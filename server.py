@@ -396,6 +396,11 @@ def username_taken(username: str = ""):
 
     try:
         taken = jellyfin.username_taken(name)
+    except RegistrationUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Username availability checks are unavailable until admin credentials are configured."
+        )
     except (
         ServerUnreachable,
         JellyfinError,

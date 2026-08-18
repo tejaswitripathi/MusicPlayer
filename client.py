@@ -6,8 +6,9 @@ import os
 import re
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 # (connect, read) seconds. A short connect timeout means an unreachable
 # server fails fast instead of blocking the whole request.
@@ -258,6 +259,9 @@ class AppClient:
         if self._admin:
             return self._admin
 
+        # Env values are often edited while the app is running; reload them
+        # before checking the admin account so the app picks up new .env edits.
+        load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
         username = os.getenv("USERNAME")
         password = os.getenv("PASSWORD")
 
@@ -339,6 +343,9 @@ class AppClient:
         if not wanted:
             return False
 
+        # Username availability checks need admin credentials; the public
+        # `/Users/Public` endpoint is not a reliable source for private names.
+        self._admin_identity()
         users = self._list_users()
 
         return any((user.get("Name") or "").lower() == wanted for user in users)

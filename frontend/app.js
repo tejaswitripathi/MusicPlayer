@@ -2399,10 +2399,20 @@ function showAuthError(id, message) {
 
 function setCreateUsernameTaken(taken) {
     const input = document.getElementById("create-username");
+    const error = document.getElementById("create-account-error");
 
     createUsernameTaken = taken;
     input?.classList.toggle("taken", taken);
     input?.setAttribute("aria-invalid", taken ? "true" : "false");
+
+    if (taken) {
+        showAuthError("create-account-error", "Username taken!");
+        return;
+    }
+
+    if (error && error.textContent === "Username taken!") {
+        hideAuthError("create-account-error");
+    }
 }
 
 function scheduleUsernameCheck() {

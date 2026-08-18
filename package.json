@@ -4,10 +4,40 @@
   "description": "Desktop player for a Jellyfin music library",
   "private": true,
   "main": "electron/main.js",
+  "build": {
+    "appId": "com.musicplayer.desktop",
+    "productName": "MusicPlayer",
+    "files": [
+      "electron/**/*",
+      "frontend/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
   "scripts": {
-    "start": "env -u ELECTRON_RUN_AS_NODE electron ."
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "release:win": "node scripts/build-release.js --target win",
+    "release:mac": "node scripts/build-release.js --target mac"
   },
   "devDependencies": {
-    "electron": "^41.7.1"
+    "electron": "^41.7.1",
+    "electron-builder": "^26.0.0"
   }
 }
