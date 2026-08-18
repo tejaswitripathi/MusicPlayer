@@ -1,0 +1,13 @@
+{
+  "name": "musicplayer",
+  "version": "0.1.0",
+  "description": "Desktop player for a Jellyfin music library",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron ."
+  },
+  "devDependencies": {
+    "electron": "^41.7.1"
+  }
+}

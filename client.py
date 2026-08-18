@@ -1,0 +1,573 @@
+from jellyfin_apiclient_python import JellyfinClient
+from jellyfin_apiclient_python.exceptions import HTTPException as JellyfinError
+import base64
+import json
+import os
+import re
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# (connect, read) seconds. A short connect timeout means an unreachable
+# server fails fast instead of blocking the whole request.
+JELLYFIN_TIMEOUT = (3, 15)
+
+# Probing happens once per candidate before anything can load, so it needs
+# to be quicker than a normal request.
+PROBE_TIMEOUT = (2, 4)
+
+
+class ServerUnreachable(Exception):
+    """No configured address for the Jellyfin server responded."""
+
+    def __init__(self, candidates):
+        self.candidates = candidates
+
+        super().__init__(
+            "None of these addresses responded: " + ", ".join(candidates)
+        )
+
+
+def read_candidates():
+    """Server addresses to try, in order.
+
+    SERVER_URLS holds a comma-separated list so the same config works on
+    the home LAN and remotely; SERVER_URL remains valid for a single one.
+    """
+    raw = os.getenv("SERVER_URLS") or os.getenv("SERVER_URL") or ""
+
+    return [url.strip().rstrip("/") for url in raw.split(",") if url.strip()]
+
+
+class AppClient:
+
+    def __init__(self):
+        self.client = JellyfinClient()
+
+        self.client_id = os.getenv("CLIENT_UUID")
+        self.access_token = os.getenv("ACCESS_TOKEN")
+        self.user_id = os.getenv("USER_ID")
+
+        self.candidates = read_candidates()
+
+        # Assumed reachable until a request proves otherwise, so startup
+        # does not pay for a probe.
+        self.server_url = self.candidates[0] if self.candidates else None
+
+        print("CANDIDATES:", self.candidates)
+        print("CLIENT_UUID:", self.client_id)
+        print("ACCESS_TOKEN exists:", self.access_token is not None)
+
+        self.client.config.app(
+            "MusicPlayer",
+            "0.0.1",
+            "tejaswis-macbook-pro",
+            self.client_id
+        )
+
+        self.client.config.data["auth.ssl"] = False
+
+        # Without this the client retries an unreachable server 3 times
+        # on top of a 30s timeout, so requests hang for minutes.
+        self.client.config.data["http.timeout"] = JELLYFIN_TIMEOUT
+        self.client.config.data["http.max_retries"] = 0
+
+        # Restore the session state from your saved login
+        self.client.config.data["auth.server"] = self.server_url
+        self.client.config.data["auth.token"] = self.access_token
+
+        if self.user_id:
+            self.client.config.data["auth.user_id"] = self.user_id
+
+        print("SERVER:", self.client.config.data.get("auth.server"))
+        print("TOKEN EXISTS:", self.client.config.data.get("auth.token") is not None)
+        print("USER ID:", self.client.config.data.get("auth.user_id"))
+
+    def get_user(self):
+        return self.client.jellyfin.get_user()
+
+    def _use(self, url):
+        self.server_url = url
+        self.client.config.data["auth.server"] = url
+
+    def _responds(self, url):
+        try:
+            response = requests.get(
+                f"{url}/System/Info/Public",
+                timeout=PROBE_TIMEOUT
+            )
+        except requests.exceptions.RequestException:
+            return False
+
+        return response.status_code == 200
+
+    def reselect_server(self):
+        """Switch to whichever candidate address answers.
+
+        Called after a request fails, so moving between the home network
+        and a remote one does not need a config change.
+        """
+        for url in self.candidates:
+            if self._responds(url):
+                print("SERVER:", url)
+                self._use(url)
+
+                return url
+
+        raise ServerUnreachable(self.candidates)
+
+    def request(self, send):
+        """Run a request, reselecting the server if it cannot be reached."""
+        if not self.candidates:
+            raise ServerUnreachable([])
+
+        try:
+            return send()
+        except (JellyfinError, requests.exceptions.RequestException):
+            self.reselect_server()
+
+            return send()
+
+    def _send(self, action, handler, params=None, body=None, data=None,
+              headers=None):
+        # The client's own convenience methods have no way to bound retries,
+        # and the default of 5 (each preceded by a 1s sleep) stacks up to a
+        # long wait when the server is unreachable. _http takes the override.
+        def send():
+            request = {
+                "params": params,
+                "retry": 0,
+                "timeout": JELLYFIN_TIMEOUT
+            }
+
+            if body is not None:
+                request["json"] = body
+
+            if data is not None:
+                request["data"] = data
+
+            if headers is not None:
+                request["headers"] = headers
+
+            return self.client.jellyfin._http(action, handler, request)
+
+        return self.request(send)
+
+    def _user_items(self, params):
+        return self._send("GET", "Users/{UserId}/Items", params=params)
+
+    def get_albums(self):
+        return self._user_items(
+            params={
+                "IncludeItemTypes": "MusicAlbum",
+                "Recursive": True,
+                "SortBy": "SortName",
+                "SortOrder": "Ascending",
+                # Path is what puts a release's disc folders in order.
+                "Fields": "Path"
+            }
+        )
+
+    def get_album_summaries(self):
+        albums = self.get_albums()
+
+        return merge_discs(albums["Items"])
+
+    def album_parts(self, album_id: str):
+        """Every album item belonging to the same release as this one.
+
+        Usually just the album itself, but a multi-disc rip arrives as one
+        item per disc folder, and browsing it should reach all of them.
+        """
+        albums = self.get_albums()["Items"]
+
+        this = next(
+            (album for album in albums if album.get("Id") == album_id),
+            None
+        )
+
+        if this is None:
+            return [album_id]
+
+        return [album.get("Id") for album in sorted_parts(albums, this)]
+
+    def get_album_tracks(self, album_id: str):
+        parts = self.album_parts(album_id)
+
+        tracks = []
+
+        for position, part in enumerate(parts):
+            response = self._user_items(
+                params={
+                    "ParentId": part,
+                    "IncludeItemTypes": "Audio",
+                    "Recursive": True,
+                    "SortBy": "ParentIndexNumber,IndexNumber",
+                    "SortOrder": "Ascending",
+                    "Fields": TRACK_FIELDS
+                }
+            )
+
+            for track in response["Items"]:
+                summary = track_summary(track)
+
+                # A disc folder whose tags never say which disc it is still
+                # counts as one, in the order the folders sort.
+                if not summary["disc"] and len(parts) > 1:
+                    summary["disc"] = position + 1
+
+                    if not summary["disc_label"]:
+                        summary["disc_label"] = f"Disc {position + 1}"
+
+                tracks.append(summary)
+
+        tracks.sort(key=lambda track: (
+            track["disc"] or 0,
+            track["track_number"] or 0
+        ))
+
+        return tracks
+
+    def get_songs(self):
+        """Every track in the library, for searching over."""
+        response = self._user_items(
+            params={
+                "IncludeItemTypes": "Audio",
+                "Recursive": True,
+                "SortBy": "SortName",
+                "SortOrder": "Ascending",
+                "Fields": TRACK_FIELDS
+            }
+        )
+
+        return [track_summary(track) for track in response["Items"]]
+
+    def get_artist_summaries(self):
+        # AlbumArtists rather than Artists: credited album artists are what a
+        # library browses by, without every featured guest becoming an entry.
+        response = self._send(
+            "GET",
+            "Artists/AlbumArtists",
+            params={
+                "UserId": "{UserId}",
+                "SortBy": "SortName",
+                "SortOrder": "Ascending"
+            }
+        )
+
+        return [
+            {
+                "id": artist.get("Id"),
+                "name": artist.get("Name"),
+                "cover_url": image_url(artist.get("Id"))
+            }
+            for artist in response["Items"]
+        ]
+
+    def get_artist_albums(self, artist_id: str):
+        response = self._user_items(
+            params={
+                "AlbumArtistIds": artist_id,
+                "IncludeItemTypes": "MusicAlbum",
+                "Recursive": True,
+                "SortBy": "ProductionYear,SortName",
+                "SortOrder": "Descending",
+                "Fields": "Path"
+            }
+        )
+
+        return merge_discs(response["Items"])
+
+    def get_playlist_summaries(self):
+        response = self._user_items(
+            params={
+                "IncludeItemTypes": "Playlist",
+                "Recursive": True,
+                "SortBy": "SortName",
+                "SortOrder": "Ascending",
+                "Fields": "Path"
+            }
+        )
+
+        return [
+            {
+                "id": playlist.get("Id"),
+                "name": playlist.get("Name"),
+                "cover_url": image_url(playlist.get("Id"))
+            }
+            for playlist in response["Items"]
+            if not is_sidecar_playlist(playlist)
+        ]
+
+    def get_playlist_tracks(self, playlist_id: str):
+        # Playlists/{id}/Items rather than a ParentId query, so tracks come
+        # back in the order the playlist puts them in, each with the entry id
+        # that removing it later needs.
+        response = self._send(
+            "GET",
+            f"Playlists/{playlist_id}/Items",
+            params={
+                "UserId": "{UserId}",
+                "Fields": TRACK_FIELDS
+            }
+        )
+
+        return [
+            dict(
+                track_summary(track),
+                playlist_item_id=track.get("PlaylistItemId")
+            )
+            for track in response["Items"]
+        ]
+
+    def add_to_playlist(self, playlist_id: str, track_ids):
+        return self._send(
+            "POST",
+            f"Playlists/{playlist_id}/Items",
+            params={
+                "Ids": ",".join(track_ids),
+                "UserId": "{UserId}"
+            }
+        )
+
+    def remove_from_playlist(self, playlist_id: str, entry_ids):
+        # Entries are addressed by PlaylistItemId, not by track id: the same
+        # song can sit in a playlist more than once.
+        return self._send(
+            "DELETE",
+            f"Playlists/{playlist_id}/Items",
+            params={"EntryIds": ",".join(entry_ids)}
+        )
+
+    def playlists_holding(self, track_id: str):
+        """Ids of the playlists that contain a track.
+
+        Jellyfin has no reverse lookup for this, so it means reading each
+        playlist. There are only ever a handful of them.
+        """
+        return [
+            playlist["id"]
+            for playlist in self.get_playlist_summaries()
+            if any(
+                track["id"] == track_id
+                for track in self.get_playlist_tracks(playlist["id"])
+            )
+        ]
+
+    def set_playlist_image(self, playlist_id: str, image: bytes, media_type):
+        # Jellyfin wants the image base64 encoded in the request body, with
+        # the real image type still declared in the header.
+        return self._send(
+            "POST",
+            f"Items/{playlist_id}/Images/Primary",
+            data=base64.b64encode(image).decode(),
+            headers={
+                "Accept": "*/*",
+                "Content-type": media_type
+            }
+        )
+
+    def create_playlist(self, name: str):
+        response = self._send(
+            "POST",
+            "Playlists",
+            body={
+                "Name": name,
+                "UserId": "{UserId}",
+                "MediaType": "Audio"
+            }
+        )
+
+        return {"id": response.get("Id"), "name": name}
+
+
+# Playlist files that album downloads often ship alongside the audio.
+SIDECAR_PLAYLIST_SUFFIXES = (".m3u", ".m3u8", ".pls", ".wpl", ".zpl")
+
+
+def is_sidecar_playlist(playlist):
+    """Whether a playlist is really just a file sitting in the music library.
+
+    Jellyfin turns any .m3u it scans into a Playlist item, so an album that
+    came with one shows up a second time as a playlist of itself. Playlists
+    the user actually made are directories under the server's own storage.
+    """
+    path = (playlist.get("Path") or "").lower()
+
+    return path.endswith(SIDECAR_PLAYLIST_SUFFIXES)
+
+
+TRACK_FIELDS = "ParentIndexNumber,RunTimeTicks,Path"
+
+TICKS_PER_SECOND = 10_000_000
+
+
+def image_url(item_id):
+    return f"/api/images/{item_id}" if item_id else None
+
+
+def duration_seconds(ticks):
+    return round(ticks / TICKS_PER_SECOND) if ticks else None
+
+
+# Disc 1, CD2, Side A, Side-B — the folder names a rip uses under an album.
+DISC_FOLDER = re.compile(
+    r"^(?:disc|disk|cd|dvd)\s*[-_. ]?\s*\d+$|^side\s*[-_. ]?\s*[a-d]$",
+    re.I
+)
+
+DISC_SUFFIX = re.compile(
+    r"\s*[\(\[]?\s*(?:disc|disk|cd|dvd|side)\s*[-_. ]?\s*(?:\d+|[a-d])\s*[\)\]]?\s*$",
+    re.I
+)
+
+
+def path_parts(path):
+    return [part for part in (path or "").replace("\\", "/").split("/") if part]
+
+
+def disc_folder_name(name):
+    name = (name or "").strip()
+
+    return name if name and DISC_FOLDER.match(name) else None
+
+
+def pretty_disc(name):
+    match = re.match(
+        r"^(disc|disk|cd|dvd|side)\s*[-_. ]?\s*(.+)$",
+        name.strip(),
+        re.I
+    )
+
+    if not match:
+        return name
+
+    kind, rest = match.group(1), match.group(2).strip()
+    kind = {"cd": "CD", "dvd": "DVD"}.get(kind.lower(), kind.capitalize())
+    rest = rest.upper() if rest.isalpha() and len(rest) == 1 else rest
+
+    return f"{kind} {rest}"
+
+
+def disc_label_from_path(path):
+    """Label taken from a Disc / Side folder sitting above the file."""
+    parts = path_parts(path)
+
+    if len(parts) < 2:
+        return None
+
+    folder = disc_folder_name(parts[-2])
+
+    return pretty_disc(folder) if folder else None
+
+
+def strip_disc_suffix(name):
+    stripped = DISC_SUFFIX.sub("", name or "").strip()
+
+    return stripped or name
+
+
+def album_title(album):
+    name = album.get("Name") or ""
+    path = album.get("Path") or ""
+    parts = path_parts(path)
+
+    # Jellyfin names some disc folders after themselves ("Disc 1"), so the
+    # parent folder is the actual release title.
+    if disc_folder_name(name) and len(parts) >= 2:
+        return parts[-2]
+
+    return strip_disc_suffix(name) or name
+
+
+def release_of(album):
+    """What makes two album items the same release.
+
+    Disc folders under one album directory are the same release even when
+    Jellyfin names each item after the folder. Otherwise a shared title and
+    artist is enough, with a trailing "(Disc 2)" ignored.
+    """
+    path = album.get("Path") or ""
+    parts = path_parts(path)
+    artist = (album.get("AlbumArtist") or "").lower()
+
+    if parts and disc_folder_name(parts[-1]) and len(parts) >= 2:
+        parent = "/".join(parts[:-1]).lower()
+
+        return ("folder", parent, artist)
+
+    return ("title", strip_disc_suffix(album.get("Name") or "").lower(), artist)
+
+
+def sorted_parts(albums, album):
+    """The items sharing a release, in disc order.
+
+    Disc folders are named so that they sort into order by path, and their
+    parent albums are otherwise indistinguishable.
+    """
+    parts = [
+        other for other in albums
+        if release_of(other) == release_of(album)
+    ]
+
+    return sorted(parts, key=lambda part: part.get("Path") or "")
+
+
+def merge_discs(albums):
+    """One entry per release rather than one per disc folder.
+
+    A multi-disc rip lands in the library as several MusicAlbum items that
+    share a name and artist, one for each Disc folder. On a shelf they belong
+    together, represented by their first disc.
+    """
+    releases = {}
+
+    for album in albums:
+        releases.setdefault(release_of(album), []).append(album)
+
+    return [
+        album_summary(sorted_parts(parts, parts[0])[0])
+        for parts in releases.values()
+    ]
+
+
+def album_summary(album):
+    return {
+        "id": album.get("Id"),
+        "title": album_title(album),
+        "artist": album.get("AlbumArtist"),
+        "year": album.get("ProductionYear"),
+        "cover_url": image_url(album.get("Id"))
+    }
+
+
+def track_summary(track):
+    """A track plus the album context the player needs to label it.
+
+    Tracks reached through search or a playlist arrive without a surrounding
+    album view, so each one carries its own artist, album and artwork.
+    """
+    artists = track.get("Artists") or []
+    disc = track.get("ParentIndexNumber")
+    label = disc_label_from_path(track.get("Path"))
+
+    return {
+        "id": track.get("Id"),
+        "title": track.get("Name"),
+        "track_number": track.get("IndexNumber"),
+        "disc": disc,
+        "disc_label": label or (f"Disc {disc}" if disc else None),
+        "duration": duration_seconds(track.get("RunTimeTicks")),
+        "album": track.get("Album"),
+        "album_id": track.get("AlbumId"),
+        "artist": track.get("AlbumArtist") or (artists[0] if artists else None),
+        "cover_url": image_url(track.get("AlbumId") or track.get("Id"))
+    }
+
+
+if __name__ == "__main__":
+    app = AppClient()
+
+    for album in app.get_album_summaries():
+        print(album)

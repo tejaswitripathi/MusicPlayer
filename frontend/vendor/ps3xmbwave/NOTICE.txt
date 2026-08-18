@@ -1,0 +1,8 @@
+MIT License — PlayStation 3 XMB wave renderer
+
+The WebGL spline/particle implementation under `frontend/vendor/ps3xmbwave/`
+is adapted from:
+
+  https://github.com/linkev/PlayStation-3-XMB
+
+Copyright (c) linkev and contributors. Used under the MIT License.
