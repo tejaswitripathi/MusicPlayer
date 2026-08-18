@@ -33,8 +33,12 @@
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:pi": "electron-builder --linux --arm64",
     "release:win": "node scripts/build-release.js --target win",
-    "release:mac": "node scripts/build-release.js --target mac"
+    "release:mac": "node scripts/build-release.js --target mac",
+    "release:linux": "node scripts/build-release.js --target linux",
+    "release:pi": "node scripts/build-release.js --target pi"
   },
   "devDependencies": {
     "electron": "^41.7.1",

@@ -16,10 +16,14 @@ if (target === "win") {
   args.push("--win");
 } else if (target === "mac") {
   args.push("--mac");
+} else if (target === "linux") {
+  args.push("--linux");
+} else if (target === "pi") {
+  args.push("--linux", "--arm64");
 } else if (target === "all") {
-  args.push("--win", "--mac");
+  args.push("--win", "--mac", "--linux");
 } else {
-  console.error("Usage: node scripts/build-release.js --target win|mac|all [--dry-run]");
+  console.error("Usage: node scripts/build-release.js --target win|mac|linux|pi|all [--dry-run]");
   console.error("Current platform:", process.platform);
   process.exit(1);
 }
