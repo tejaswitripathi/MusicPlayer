@@ -787,6 +787,12 @@ function readImageFile(file) {
 function showProfile() {
     showPage("profile-page");
     updateProfileAvatar();
+
+    const name = document.getElementById("profile-username");
+
+    if (name) {
+        name.textContent = currentUser ? currentUser.username : "";
+    }
 }
 
 function showPersonalization() {
@@ -831,7 +837,9 @@ function wirePersonalizationUi() {
 
         closeUserDropdown();
 
-        if (item.dataset.action === "profile") {
+        if (item.dataset.action === "login") {
+            openView(showLogin);
+        } else if (item.dataset.action === "profile") {
             openView(showProfile);
         } else if (item.dataset.action === "personalization") {
             openView(showPersonalization);

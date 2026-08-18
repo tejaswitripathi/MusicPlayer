@@ -1,17 +1,21 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import Response as RawResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from jellyfin_apiclient_python.exceptions import HTTPException as JellyfinError
 from client import (
     AppClient,
+    InvalidCredentials,
     ServerUnreachable,
+    authorization_header,
     JELLYFIN_TIMEOUT
 )
 from pathlib import Path
 from pydantic import BaseModel
 import requests
+import secrets
+import threading
 import time
 
 
@@ -23,6 +27,9 @@ LIBRARY_CACHE_SECONDS = 300
 # most of the library.
 MAX_SEARCH_RESULTS = 60
 
+SESSION_COOKIE = "musicplayer_session"
+SESSION_MAX_AGE = 60 * 60 * 24 * 30
+
 
 class NewPlaylist(BaseModel):
     name: str
@@ -32,7 +39,12 @@ class PlaylistItems(BaseModel):
     track_ids: list[str]
 
 
-def unreachable(error):
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def unreachable(error, client=None):
     if isinstance(error, ServerUnreachable):
         tried = ", ".join(error.candidates) or "no addresses configured"
 
@@ -42,28 +54,23 @@ def unreachable(error):
             f"lists an address reachable from this network."
         )
     else:
+        server = client.server_url if client is not None else jellyfin.server_url
+
         detail = (
-            f"Could not reach the Jellyfin server at {jellyfin.server_url}. "
+            f"Could not reach the Jellyfin server at {server}. "
             f"({error})"
         )
 
     return HTTPException(status_code=503, detail=detail)
 
 
-def auth_headers():
+def auth_headers(client):
     return {
-        "Authorization": (
-            f'MediaBrowser '
-            f'Client="MusicPlayer", '
-            f'Device="tejaswis-macbook-pro", '
-            f'DeviceId="{jellyfin.client_id}", '
-            f'Version="0.0.1", '
-            f'Token="{jellyfin.access_token}"'
-        )
+        "Authorization": authorization_header(client.client_id, client.access_token)
     }
 
 
-def jellyfin_call(send):
+def jellyfin_call(send, client=None):
     """Run a call against the Jellyfin client, turning failures into a 503."""
     try:
         return send()
@@ -72,23 +79,23 @@ def jellyfin_call(send):
         JellyfinError,
         requests.exceptions.RequestException
     ) as error:
-        raise unreachable(error)
+        raise unreachable(error, client)
 
 
-def jellyfin_get(path, headers=None, timeout=JELLYFIN_TIMEOUT, stream=False):
+def jellyfin_get(client, path, headers=None, timeout=JELLYFIN_TIMEOUT, stream=False):
     """GET a path on the Jellyfin server, reselecting its address on failure."""
-    request_headers = auth_headers()
+    request_headers = auth_headers(client)
     request_headers.update(headers or {})
 
     def send():
         return requests.get(
-            f"{jellyfin.server_url}{path}",
+            f"{client.server_url}{path}",
             headers=request_headers,
             timeout=timeout,
             stream=stream
         )
 
-    return jellyfin.request(send)
+    return client.request(send)
 
 
 app = FastAPI()
@@ -103,36 +110,48 @@ app.add_middleware(
 
 jellyfin = AppClient()
 
+sessions = {}
+sessions_lock = threading.Lock()
+
 
 class Library:
     """Everything searchable, kept in memory between queries.
 
     Fetching every song takes seconds, which is far too slow to repeat while
-    someone is typing.
+    someone is typing. Each Jellyfin user has their own copy.
     """
 
     def __init__(self):
-        self.cached = None
-        self.fetched_at = 0.0
+        self.caches = {}
 
-    def invalidate(self):
-        self.cached = None
+    def invalidate(self, user_id=None):
+        if user_id is None:
+            self.caches.clear()
+        else:
+            self.caches.pop(user_id, None)
 
-    def contents(self):
-        fresh = time.monotonic() - self.fetched_at < LIBRARY_CACHE_SECONDS
+    def contents(self, client):
+        entry = self.caches.get(client.user_id)
+        fresh = (
+            entry is not None
+            and time.monotonic() - entry["fetched_at"] < LIBRARY_CACHE_SECONDS
+        )
 
-        if self.cached is not None and fresh:
-            return self.cached
+        if fresh:
+            return entry["cached"]
 
-        self.cached = {
-            "songs": jellyfin.get_songs(),
-            "albums": jellyfin.get_album_summaries(),
-            "artists": jellyfin.get_artist_summaries()
+        cached = {
+            "songs": client.get_songs(),
+            "albums": client.get_album_summaries(),
+            "artists": client.get_artist_summaries()
         }
 
-        self.fetched_at = time.monotonic()
+        self.caches[client.user_id] = {
+            "cached": cached,
+            "fetched_at": time.monotonic()
+        }
 
-        return self.cached
+        return cached
 
 
 library = Library()
@@ -153,6 +172,68 @@ def matching(items, field, query):
     return results
 
 
+def lookup_session(request: Request):
+    token = request.cookies.get(SESSION_COOKIE)
+
+    if not token:
+        return None
+
+    with sessions_lock:
+        return sessions.get(token)
+
+
+def require_client(request: Request):
+    session = lookup_session(request)
+
+    if session is None:
+        raise HTTPException(status_code=401, detail="Not logged in.")
+
+    return session["client"]
+
+
+def bind_session(response: Response, request: Request, identity):
+    """Store Jellyfin credentials server-side; the browser only gets a cookie."""
+    old = request.cookies.get(SESSION_COOKIE)
+    session_id = secrets.token_urlsafe(32)
+    client = jellyfin.for_user(identity["user_id"], identity["access_token"])
+
+    with sessions_lock:
+        if old:
+            sessions.pop(old, None)
+
+        sessions[session_id] = {
+            "user_id": identity["user_id"],
+            "access_token": identity["access_token"],
+            "username": identity["username"],
+            "client": client
+        }
+
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_MAX_AGE,
+        path="/",
+        secure=request.url.scheme == "https"
+    )
+
+
+def drop_session(request: Request, response: Response):
+    token = request.cookies.get(SESSION_COOKIE)
+
+    if token:
+        with sessions_lock:
+            sessions.pop(token, None)
+
+    response.delete_cookie(
+        SESSION_COOKIE,
+        path="/",
+        samesite="lax",
+        secure=request.url.scheme == "https"
+    )
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -160,16 +241,66 @@ def health():
     }
 
 
+@app.get("/api/session")
+def get_session(request: Request):
+    session = lookup_session(request)
+
+    if session is None:
+        return {"logged_in": False}
+
+    return {
+        "logged_in": True,
+        "username": session["username"]
+    }
+
+
+@app.post("/api/login")
+def login(body: LoginRequest, request: Request, response: Response):
+    username = body.username.strip()
+
+    if not username:
+        raise HTTPException(status_code=400, detail="A username is required.")
+
+    try:
+        identity = jellyfin.login(username, body.password)
+    except InvalidCredentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password."
+        )
+    except (
+        ServerUnreachable,
+        JellyfinError,
+        requests.exceptions.RequestException
+    ) as error:
+        raise unreachable(error)
+
+    bind_session(response, request, identity)
+
+    return {
+        "logged_in": True,
+        "username": identity["username"]
+    }
+
+
+@app.post("/api/logout")
+def logout(request: Request, response: Response):
+    drop_session(request, response)
+
+    return {"logged_in": False}
+
+
 @app.get("/api/albums")
-def get_albums():
-    return jellyfin_call(jellyfin.get_album_summaries)
+def get_albums(client: AppClient = Depends(require_client)):
+    return jellyfin_call(client.get_album_summaries, client)
 
 
 @app.get("/api/images/{item_id}")
-def get_item_image(item_id: str):
+def get_item_image(item_id: str, client: AppClient = Depends(require_client)):
     """Primary artwork for any item: album, playlist or artist."""
     response = jellyfin_call(
-        lambda: jellyfin_get(f"/Items/{item_id}/Images/Primary")
+        lambda: jellyfin_get(client, f"/Items/{item_id}/Images/Primary"),
+        client
     )
 
     if response.status_code != 200:
@@ -178,35 +309,35 @@ def get_item_image(item_id: str):
             detail="Could not retrieve artwork"
         )
 
-    return Response(
+    return RawResponse(
         content=response.content,
         media_type=response.headers.get("Content-Type", "image/jpeg")
     )
 
 
 @app.get("/api/albums/{album_id}/tracks")
-def get_album_tracks(album_id: str):
-    return jellyfin_call(lambda: jellyfin.get_album_tracks(album_id))
+def get_album_tracks(album_id: str, client: AppClient = Depends(require_client)):
+    return jellyfin_call(lambda: client.get_album_tracks(album_id), client)
 
 
 @app.get("/api/artists")
-def get_artists():
-    return jellyfin_call(jellyfin.get_artist_summaries)
+def get_artists(client: AppClient = Depends(require_client)):
+    return jellyfin_call(client.get_artist_summaries, client)
 
 
 @app.get("/api/artists/{artist_id}/albums")
-def get_artist_albums(artist_id: str):
-    return jellyfin_call(lambda: jellyfin.get_artist_albums(artist_id))
+def get_artist_albums(artist_id: str, client: AppClient = Depends(require_client)):
+    return jellyfin_call(lambda: client.get_artist_albums(artist_id), client)
 
 
 @app.get("/api/playlists")
-def get_playlists():
-    return jellyfin_call(jellyfin.get_playlist_summaries)
+def get_playlists(client: AppClient = Depends(require_client)):
+    return jellyfin_call(client.get_playlist_summaries, client)
 
 
 @app.post("/api/playlists")
-def create_playlist(request: NewPlaylist):
-    name = request.name.strip()
+def create_playlist(body: NewPlaylist, client: AppClient = Depends(require_client)):
+    name = body.name.strip()
 
     if not name:
         raise HTTPException(
@@ -214,37 +345,55 @@ def create_playlist(request: NewPlaylist):
             detail="A playlist needs a name."
         )
 
-    return jellyfin_call(lambda: jellyfin.create_playlist(name))
+    created = jellyfin_call(lambda: client.create_playlist(name), client)
+
+    library.invalidate(client.user_id)
+
+    return created
 
 
 @app.get("/api/playlists/{playlist_id}/tracks")
-def get_playlist_tracks(playlist_id: str):
-    return jellyfin_call(lambda: jellyfin.get_playlist_tracks(playlist_id))
+def get_playlist_tracks(playlist_id: str, client: AppClient = Depends(require_client)):
+    return jellyfin_call(lambda: client.get_playlist_tracks(playlist_id), client)
 
 
 @app.post("/api/playlists/{playlist_id}/items")
-def add_playlist_items(playlist_id: str, request: PlaylistItems):
-    if not request.track_ids:
+def add_playlist_items(
+    playlist_id: str,
+    body: PlaylistItems,
+    client: AppClient = Depends(require_client)
+):
+    if not body.track_ids:
         raise HTTPException(status_code=400, detail="No tracks to add.")
 
     jellyfin_call(
-        lambda: jellyfin.add_to_playlist(playlist_id, request.track_ids)
+        lambda: client.add_to_playlist(playlist_id, body.track_ids),
+        client
     )
 
-    return {"added": len(request.track_ids)}
+    return {"added": len(body.track_ids)}
 
 
 @app.delete("/api/playlists/{playlist_id}/items/{entry_id}")
-def remove_playlist_item(playlist_id: str, entry_id: str):
+def remove_playlist_item(
+    playlist_id: str,
+    entry_id: str,
+    client: AppClient = Depends(require_client)
+):
     jellyfin_call(
-        lambda: jellyfin.remove_from_playlist(playlist_id, [entry_id])
+        lambda: client.remove_from_playlist(playlist_id, [entry_id]),
+        client
     )
 
     return {"removed": entry_id}
 
 
 @app.post("/api/playlists/{playlist_id}/image")
-async def set_playlist_image(playlist_id: str, request: Request):
+async def set_playlist_image(
+    playlist_id: str,
+    request: Request,
+    client: AppClient = Depends(require_client)
+):
     image = await request.body()
 
     if not image:
@@ -253,20 +402,21 @@ async def set_playlist_image(playlist_id: str, request: Request):
     media_type = request.headers.get("content-type") or "image/jpeg"
 
     jellyfin_call(
-        lambda: jellyfin.set_playlist_image(playlist_id, image, media_type)
+        lambda: client.set_playlist_image(playlist_id, image, media_type),
+        client
     )
 
     return {"updated": playlist_id}
 
 
 @app.get("/api/tracks/{track_id}/playlists")
-def get_track_playlists(track_id: str):
+def get_track_playlists(track_id: str, client: AppClient = Depends(require_client)):
     """Which playlists already hold a track, for the add-to-playlist list."""
-    return jellyfin_call(lambda: jellyfin.playlists_holding(track_id))
+    return jellyfin_call(lambda: client.playlists_holding(track_id), client)
 
 
 @app.get("/api/search")
-def search(query: str = ""):
+def search(query: str = "", client: AppClient = Depends(require_client)):
     """Songs, albums and artists whose name contains the query.
 
     Matching is a case-insensitive substring test over a cached copy of the
@@ -278,7 +428,7 @@ def search(query: str = ""):
     if not query:
         return {"songs": [], "albums": [], "artists": []}
 
-    contents = jellyfin_call(library.contents)
+    contents = jellyfin_call(lambda: library.contents(client), client)
 
     return {
         "songs": matching(contents["songs"], "title", query),
@@ -288,7 +438,7 @@ def search(query: str = ""):
 
 
 @app.get("/api/tracks/{track_id}/stream")
-def stream_track(track_id: str, request: Request):
+def stream_track(track_id: str, request: Request, client: AppClient = Depends(require_client)):
 
     headers = {}
 
@@ -300,6 +450,7 @@ def stream_track(track_id: str, request: Request):
 
     try:
         response = jellyfin_get(
+            client,
             f"/Items/{track_id}/Download",
             headers=headers,
             timeout=(3, 60),
@@ -309,7 +460,7 @@ def stream_track(track_id: str, request: Request):
         ServerUnreachable,
         requests.exceptions.RequestException
     ) as error:
-        raise unreachable(error)
+        raise unreachable(error, client)
 
     print("Browser Range:", range_header)
     print("Jellyfin status:", response.status_code)

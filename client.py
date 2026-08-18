@@ -17,6 +17,10 @@ JELLYFIN_TIMEOUT = (3, 15)
 # to be quicker than a normal request.
 PROBE_TIMEOUT = (2, 4)
 
+APP_NAME = "MusicPlayer"
+APP_VERSION = "0.0.1"
+DEVICE_NAME = "MusicPlayer"
+
 
 class ServerUnreachable(Exception):
     """No configured address for the Jellyfin server responded."""
@@ -27,6 +31,10 @@ class ServerUnreachable(Exception):
         super().__init__(
             "None of these addresses responded: " + ", ".join(candidates)
         )
+
+
+class InvalidCredentials(Exception):
+    """Jellyfin rejected the username or password."""
 
 
 def read_candidates():
@@ -40,49 +48,78 @@ def read_candidates():
     return [url.strip().rstrip("/") for url in raw.split(",") if url.strip()]
 
 
+def make_jellyfin_client(client_id, server_url, user_id=None, access_token=None):
+    """A Jellyfin client for this app, optionally signed in as one user."""
+    client = JellyfinClient()
+
+    client.config.app(APP_NAME, APP_VERSION, DEVICE_NAME, client_id)
+    client.config.data["auth.ssl"] = False
+
+    # Without this the client retries an unreachable server 3 times
+    # on top of a 30s timeout, so requests hang for minutes.
+    client.config.data["http.timeout"] = JELLYFIN_TIMEOUT
+    client.config.data["http.max_retries"] = 0
+    client.config.data["auth.server"] = server_url
+
+    if access_token:
+        client.config.data["auth.token"] = access_token
+
+    if user_id:
+        client.config.data["auth.user_id"] = user_id
+
+    return client
+
+
+def authorization_header(client_id, access_token=None):
+    header = (
+        f'MediaBrowser '
+        f'Client="{APP_NAME}", '
+        f'Device="{DEVICE_NAME}", '
+        f'DeviceId="{client_id}", '
+        f'Version="{APP_VERSION}"'
+    )
+
+    if access_token:
+        header += f', Token="{access_token}"'
+
+    return header
+
+
 class AppClient:
 
-    def __init__(self):
-        self.client = JellyfinClient()
+    def __init__(self, user_id=None, access_token=None, _home=None):
+        self.user_id = user_id
+        self.access_token = access_token
+        self._home = _home
 
-        self.client_id = os.getenv("CLIENT_UUID")
-        self.access_token = os.getenv("ACCESS_TOKEN")
-        self.user_id = os.getenv("USER_ID")
+        if _home is not None:
+            self.client_id = _home.client_id
+            self.candidates = _home.candidates
+            self.server_url = _home.server_url
+        else:
+            self.client_id = os.getenv("CLIENT_UUID")
+            self.candidates = read_candidates()
 
-        self.candidates = read_candidates()
+            # Assumed reachable until a request proves otherwise, so startup
+            # does not pay for a probe.
+            self.server_url = self.candidates[0] if self.candidates else None
 
-        # Assumed reachable until a request proves otherwise, so startup
-        # does not pay for a probe.
-        self.server_url = self.candidates[0] if self.candidates else None
+            print("CANDIDATES:", self.candidates)
+            print("CLIENT_UUID:", self.client_id)
+            print("SERVER:", self.server_url)
 
-        print("CANDIDATES:", self.candidates)
-        print("CLIENT_UUID:", self.client_id)
-        print("ACCESS_TOKEN exists:", self.access_token is not None)
-
-        self.client.config.app(
-            "MusicPlayer",
-            "0.0.1",
-            "tejaswis-macbook-pro",
-            self.client_id
+        self.client = make_jellyfin_client(
+            self.client_id,
+            self.server_url,
+            user_id,
+            access_token
         )
 
-        self.client.config.data["auth.ssl"] = False
+    def for_user(self, user_id, access_token):
+        """A client that talks to Jellyfin as this user, not a global identity."""
+        home = self._home if self._home is not None else self
 
-        # Without this the client retries an unreachable server 3 times
-        # on top of a 30s timeout, so requests hang for minutes.
-        self.client.config.data["http.timeout"] = JELLYFIN_TIMEOUT
-        self.client.config.data["http.max_retries"] = 0
-
-        # Restore the session state from your saved login
-        self.client.config.data["auth.server"] = self.server_url
-        self.client.config.data["auth.token"] = self.access_token
-
-        if self.user_id:
-            self.client.config.data["auth.user_id"] = self.user_id
-
-        print("SERVER:", self.client.config.data.get("auth.server"))
-        print("TOKEN EXISTS:", self.client.config.data.get("auth.token") is not None)
-        print("USER ID:", self.client.config.data.get("auth.user_id"))
+        return AppClient(user_id, access_token, _home=home)
 
     def get_user(self):
         return self.client.jellyfin.get_user()
@@ -90,6 +127,9 @@ class AppClient:
     def _use(self, url):
         self.server_url = url
         self.client.config.data["auth.server"] = url
+
+        if self._home is not None:
+            self._home.server_url = url
 
     def _responds(self, url):
         try:
@@ -128,6 +168,46 @@ class AppClient:
             self.reselect_server()
 
             return send()
+
+    def login(self, username, password):
+        """Authenticate against Jellyfin. Does not keep the token on this client."""
+        if not self.candidates:
+            raise ServerUnreachable([])
+
+        def send():
+            return requests.post(
+                f"{self.server_url}/Users/AuthenticateByName",
+                json={"Username": username, "Pw": password},
+                headers={
+                    "Authorization": authorization_header(self.client_id),
+                    "Content-Type": "application/json"
+                },
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        response = self.request(send)
+
+        if response.status_code in (400, 401, 403):
+            raise InvalidCredentials()
+
+        if response.status_code != 200:
+            raise requests.exceptions.RequestException(
+                f"Login failed with status {response.status_code}"
+            )
+
+        data = response.json()
+        user = data.get("User") or {}
+        user_id = user.get("Id")
+        access_token = data.get("AccessToken")
+
+        if not user_id or not access_token:
+            raise InvalidCredentials()
+
+        return {
+            "user_id": user_id,
+            "access_token": access_token,
+            "username": user.get("Name") or username
+        }
 
     def _send(self, action, handler, params=None, body=None, data=None,
               headers=None):
@@ -568,6 +648,14 @@ def track_summary(track):
 
 if __name__ == "__main__":
     app = AppClient()
+    username = os.getenv("USERNAME")
+    password = os.getenv("PASSWORD")
 
-    for album in app.get_album_summaries():
+    if not username:
+        raise SystemExit("Set USERNAME and PASSWORD in .env to try the client.")
+
+    identity = app.login(username, password)
+    user = app.for_user(identity["user_id"], identity["access_token"])
+
+    for album in user.get_album_summaries():
         print(album)

@@ -290,6 +290,14 @@ function formatDuration(seconds) {
 
 
 function readJson(response) {
+    if (response.status === 401) {
+        const path = new URL(response.url, window.location.origin).pathname;
+
+        if (path !== "/api/login") {
+            forgetSession();
+        }
+    }
+
     if (response.ok) {
         return response.json();
     }
@@ -300,7 +308,12 @@ function readJson(response) {
             throw new Error(response.statusText);
         })
         .then(body => {
-            throw new Error(body.detail || response.statusText);
+            const detail = body.detail;
+            const message = typeof detail === "string"
+                ? detail
+                : response.statusText;
+
+            throw new Error(message);
         });
 }
 
@@ -408,6 +421,10 @@ function showLibrary() {
 function loadLibrary() {
     // Opening the tab and regaining focus both land here, and alt-tabbing
     // can do that in bursts, so repeats within a few seconds are dropped.
+    if (!currentUser) {
+        return;
+    }
+
     if (Date.now() - libraryLoadedAt < LIBRARY_REFRESH_FLOOR_MS) {
         return;
     }
@@ -2314,11 +2331,121 @@ function stopOscilloscope() {
 }
 
 
+/* Account */
+
+let currentUser = null;
+
+function updateAccountMenu() {
+    const loginItem = document.querySelector('[data-action="login"]');
+    const profileItem = document.querySelector('[data-action="profile"]');
+    const loggedIn = Boolean(currentUser);
+
+    loginItem?.classList.toggle("hidden", loggedIn);
+    profileItem?.classList.toggle("hidden", !loggedIn);
+}
+
+function forgetSession() {
+    currentUser = null;
+    playlists = [];
+    libraryLoadedAt = 0;
+    updateAccountMenu();
+
+    if (currentView !== showLogin) {
+        openTab(showLogin);
+    }
+}
+
+function showLogin() {
+    showPage("login-page");
+
+    const error = document.getElementById("login-error");
+
+    error.classList.add("hidden");
+    error.textContent = "";
+
+    document.getElementById("login-username")?.focus();
+}
+
+function submitLogin() {
+    const username = document.getElementById("login-username").value.trim();
+    const password = document.getElementById("login-password").value;
+    const error = document.getElementById("login-error");
+    const button = document.getElementById("login-submit");
+
+    error.classList.add("hidden");
+    error.textContent = "";
+    button.disabled = true;
+
+    fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+        .then(readJson)
+        .then(session => {
+            currentUser = { username: session.username };
+            document.getElementById("login-password").value = "";
+            updateAccountMenu();
+            libraryLoadedAt = 0;
+            openTab(showLibrary);
+        })
+        .catch(err => {
+            error.textContent = err.message;
+            error.classList.remove("hidden");
+        })
+        .finally(() => {
+            button.disabled = false;
+        });
+}
+
+function logout() {
+    fetch("/api/logout", { method: "POST" })
+        .catch(() => {})
+        .finally(() => {
+            forgetSession();
+        });
+}
+
+function restoreSession() {
+    return fetch("/api/session")
+        .then(readJson)
+        .then(session => {
+            if (session.logged_in) {
+                currentUser = { username: session.username };
+                updateAccountMenu();
+                currentView = showLibrary;
+                showLibrary();
+
+                return;
+            }
+
+            currentUser = null;
+            updateAccountMenu();
+            currentView = showLogin;
+            showLogin();
+        })
+        .catch(() => {
+            currentUser = null;
+            updateAccountMenu();
+            currentView = showLogin;
+            showLogin();
+        });
+}
+
+function wireLoginForm() {
+    document.getElementById("login-form")?.addEventListener("submit", event => {
+        event.preventDefault();
+        submitLogin();
+    });
+
+    document.getElementById("logout-button")?.addEventListener("click", logout);
+}
+
+
 /* Start */
 
 wirePersonalizationUi();
+wireLoginForm();
 applyTheme();
-
-currentView = showLibrary;
-
-showLibrary();
+updateAccountMenu();
+restoreSession();
