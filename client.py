@@ -37,6 +37,23 @@ class InvalidCredentials(Exception):
     """Jellyfin rejected the username or password."""
 
 
+class UserAlreadyExists(Exception):
+    """That Jellyfin username is already taken."""
+
+
+class RegistrationUnavailable(Exception):
+    """The backend is not allowed to create Jellyfin users."""
+
+
+class RegistrationFailed(Exception):
+    """Jellyfin rejected the new account for a reason other than a clash."""
+
+    def __init__(self, message):
+        self.message = message
+
+        super().__init__(message)
+
+
 def read_candidates():
     """Server addresses to try, in order.
 
@@ -85,6 +102,26 @@ def authorization_header(client_id, access_token=None):
     return header
 
 
+def jellyfin_message(response):
+    try:
+        data = response.json()
+    except ValueError:
+        return ""
+
+    if isinstance(data, str):
+        return data
+
+    if not isinstance(data, dict):
+        return ""
+
+    return str(
+        data.get("Message")
+        or data.get("detail")
+        or data.get("title")
+        or ""
+    )
+
+
 class AppClient:
 
     def __init__(self, user_id=None, access_token=None, _home=None):
@@ -107,6 +144,8 @@ class AppClient:
             print("CANDIDATES:", self.candidates)
             print("CLIENT_UUID:", self.client_id)
             print("SERVER:", self.server_url)
+
+        self._admin = None
 
         self.client = make_jellyfin_client(
             self.client_id,
@@ -208,6 +247,139 @@ class AppClient:
             "access_token": access_token,
             "username": user.get("Name") or username
         }
+
+    def _admin_headers(self, access_token):
+        return {
+            "Authorization": authorization_header(self.client_id, access_token),
+            "Content-Type": "application/json"
+        }
+
+    def _admin_identity(self):
+        if self._admin:
+            return self._admin
+
+        username = os.getenv("USERNAME")
+        password = os.getenv("PASSWORD")
+
+        if not username or password is None:
+            raise RegistrationUnavailable()
+
+        try:
+            self._admin = self.login(username, password)
+        except InvalidCredentials:
+            raise RegistrationUnavailable()
+
+        return self._admin
+
+    def create_user(self, username, password):
+        """Create a Jellyfin user, then sign in as that user."""
+        admin = self._admin_identity()
+
+        def send():
+            return requests.post(
+                f"{self.server_url}/Users/New",
+                json={"Name": username, "Password": password},
+                headers=self._admin_headers(admin["access_token"]),
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        response = self.request(send)
+
+        if response.status_code == 409:
+            raise UserAlreadyExists()
+
+        if response.status_code == 400:
+            message = jellyfin_message(response)
+
+            if "exist" in message.lower() or "already" in message.lower():
+                raise UserAlreadyExists()
+
+            raise RegistrationFailed(message or "Could not create that account.")
+
+        if response.status_code in (401, 403):
+            raise RegistrationUnavailable()
+
+        if response.status_code not in (200, 201):
+            raise requests.exceptions.RequestException(
+                f"Could not create the account ({response.status_code})"
+            )
+
+        created = response.json() or {}
+        self._enable_library_access(admin["access_token"], created)
+
+        return self.login(username, password)
+
+    def _enable_library_access(self, admin_token, user):
+        """New Jellyfin users otherwise start with no library folders."""
+        user_id = user.get("Id")
+        policy = dict(user.get("Policy") or {})
+
+        if not user_id or policy.get("EnableAllFolders"):
+            return
+
+        policy["EnableAllFolders"] = True
+
+        def send():
+            return requests.post(
+                f"{self.server_url}/Users/{user_id}/Policy",
+                json=policy,
+                headers=self._admin_headers(admin_token),
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        try:
+            self.request(send)
+        except (JellyfinError, requests.exceptions.RequestException):
+            pass
+
+    def username_taken(self, username):
+        """Whether a Jellyfin user already has this name."""
+        wanted = username.strip().lower()
+
+        if not wanted:
+            return False
+
+        users = self._list_users()
+
+        return any((user.get("Name") or "").lower() == wanted for user in users)
+
+    def _list_users(self):
+        try:
+            admin = self._admin_identity()
+        except RegistrationUnavailable:
+            admin = None
+
+        def send_admin():
+            return requests.get(
+                f"{self.server_url}/Users",
+                headers=self._admin_headers(admin["access_token"]),
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        def send_public():
+            return requests.get(
+                f"{self.server_url}/Users/Public",
+                headers={"Authorization": authorization_header(self.client_id)},
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        if admin:
+            response = self.request(send_admin)
+
+            if response.status_code in (401, 403):
+                self._admin = None
+                response = self.request(send_public)
+        else:
+            response = self.request(send_public)
+
+        if response.status_code != 200:
+            raise requests.exceptions.RequestException(
+                f"Could not list users ({response.status_code})"
+            )
+
+        users = response.json()
+
+        return users if isinstance(users, list) else []
 
     def _send(self, action, handler, params=None, body=None, data=None,
               headers=None):

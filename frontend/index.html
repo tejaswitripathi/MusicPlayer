@@ -193,7 +193,7 @@
             <p class="page-kind">Account</p>
             <h1 class="page-title">Log in</h1>
 
-            <form id="login-form" autocomplete="on">
+            <form id="login-form" class="auth-form" autocomplete="on">
                 <label>
                     Username
                     <input
@@ -220,6 +220,65 @@
 
                 <button id="login-submit" type="submit">Log in</button>
             </form>
+
+            <p class="auth-switch">
+                New here?
+                <button type="button" id="open-create-account">Create an account</button>
+            </p>
+
+        </section>
+
+        <section id="create-account-page" class="page hidden">
+
+            <button class="back-button">← Back</button>
+
+            <p class="page-kind">Account</p>
+            <h1 class="page-title">Create an account</h1>
+
+            <form id="create-account-form" class="auth-form" autocomplete="on">
+                <label>
+                    Username
+                    <input
+                        id="create-username"
+                        name="username"
+                        type="text"
+                        autocomplete="username"
+                        spellcheck="false"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Password
+                    <input
+                        id="create-password"
+                        name="password"
+                        type="password"
+                        autocomplete="new-password"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Confirm password
+                    <input
+                        id="create-password-confirm"
+                        name="password-confirm"
+                        type="password"
+                        autocomplete="new-password"
+                        required
+                    >
+                </label>
+
+                <p id="create-account-error" class="error hidden"></p>
+
+                <button id="create-account-submit" type="submit">Create account</button>
+            </form>
+
+            <p class="auth-switch">
+                Already have an account?
+                <button type="button" id="open-login">Log in</button>
+            </p>
 
         </section>
 

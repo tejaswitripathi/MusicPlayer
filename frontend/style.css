@@ -1556,9 +1556,9 @@ body.oscope-open #top-bar {
 }
 
 
-/* Login */
+/* Login & create account */
 
-#login-form {
+.auth-form {
     max-width: 360px;
 
     display: flex;
@@ -1566,7 +1566,7 @@ body.oscope-open #top-bar {
     gap: 16px;
 }
 
-#login-form label {
+.auth-form label {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -1575,7 +1575,7 @@ body.oscope-open #top-bar {
     font-size: 13px;
 }
 
-#login-form input {
+.auth-form input {
     padding: 10px 14px;
 
     background-color: var(--surface-raised);
@@ -1590,11 +1590,16 @@ body.oscope-open #top-bar {
     outline: none;
 }
 
-#login-form input:focus {
+.auth-form input:focus {
     border-color: #555;
 }
 
-#login-submit {
+.auth-form input.taken,
+.auth-form input.taken:focus {
+    border-color: #d9534f;
+}
+
+.auth-form button[type="submit"] {
     align-self: flex-start;
 
     margin-top: 4px;
@@ -1613,18 +1618,44 @@ body.oscope-open #top-bar {
     cursor: pointer;
 }
 
-#login-submit:hover {
+.auth-form button[type="submit"]:hover {
     background: #eee;
 }
 
-#login-submit:disabled {
+.auth-form button[type="submit"]:disabled {
     opacity: 0.55;
 
     cursor: default;
 }
 
-#login-error {
+.auth-form .error {
     margin: 0;
+}
+
+.auth-switch {
+    margin: 22px 0 0 0;
+
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.auth-switch button {
+    padding: 0;
+
+    background: none;
+    border: none;
+
+    color: var(--text);
+    font-family: inherit;
+    font-size: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+
+    cursor: pointer;
+}
+
+.auth-switch button:hover {
+    color: var(--text-muted);
 }
 
 

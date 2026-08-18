@@ -1,4 +1,5 @@
 const SEARCH_DEBOUNCE_MS = 140;
+const USERNAME_CHECK_DEBOUNCE_MS = 450;
 const LIBRARY_REFRESH_FLOOR_MS = 8000;
 
 const player = document.getElementById("audio-player");
@@ -2355,25 +2356,99 @@ function forgetSession() {
     }
 }
 
+let usernameCheckTimer = null;
+let usernameCheckSequence = 0;
+let createUsernameTaken = false;
+
+function signedIn(username) {
+    currentUser = { username };
+    updateAccountMenu();
+    libraryLoadedAt = 0;
+
+    return loadAccountPreferences().finally(() => {
+        openTab(showLibrary);
+    });
+}
+
 function showLogin() {
     showPage("login-page");
+    hideAuthError("login-error");
+    document.getElementById("login-username")?.focus();
+}
 
-    const error = document.getElementById("login-error");
+function showCreateAccount() {
+    showPage("create-account-page");
+    hideAuthError("create-account-error");
+    setCreateUsernameTaken(false);
+    document.getElementById("create-username")?.focus();
+}
+
+function hideAuthError(id) {
+    const error = document.getElementById(id);
 
     error.classList.add("hidden");
     error.textContent = "";
+}
 
-    document.getElementById("login-username")?.focus();
+function showAuthError(id, message) {
+    const error = document.getElementById(id);
+
+    error.textContent = message;
+    error.classList.remove("hidden");
+}
+
+function setCreateUsernameTaken(taken) {
+    const input = document.getElementById("create-username");
+
+    createUsernameTaken = taken;
+    input?.classList.toggle("taken", taken);
+    input?.setAttribute("aria-invalid", taken ? "true" : "false");
+}
+
+function scheduleUsernameCheck() {
+    clearTimeout(usernameCheckTimer);
+    usernameCheckTimer = setTimeout(checkUsernameTaken, USERNAME_CHECK_DEBOUNCE_MS);
+}
+
+function checkUsernameTaken() {
+    clearTimeout(usernameCheckTimer);
+
+    const input = document.getElementById("create-username");
+    const username = (input?.value || "").trim();
+
+    if (!username) {
+        setCreateUsernameTaken(false);
+        return;
+    }
+
+    const sequence = ++usernameCheckSequence;
+
+    fetch(`/api/username-taken?username=${encodeURIComponent(username)}`)
+        .then(readJson)
+        .then(result => {
+            if (sequence !== usernameCheckSequence) {
+                return;
+            }
+
+            if ((input.value || "").trim() !== username) {
+                return;
+            }
+
+            setCreateUsernameTaken(Boolean(result.taken));
+        })
+        .catch(() => {
+            if (sequence === usernameCheckSequence) {
+                setCreateUsernameTaken(false);
+            }
+        });
 }
 
 function submitLogin() {
     const username = document.getElementById("login-username").value.trim();
     const password = document.getElementById("login-password").value;
-    const error = document.getElementById("login-error");
     const button = document.getElementById("login-submit");
 
-    error.classList.add("hidden");
-    error.textContent = "";
+    hideAuthError("login-error");
     button.disabled = true;
 
     fetch("/api/login", {
@@ -2383,15 +2458,50 @@ function submitLogin() {
     })
         .then(readJson)
         .then(session => {
-            currentUser = { username: session.username };
             document.getElementById("login-password").value = "";
-            updateAccountMenu();
-            libraryLoadedAt = 0;
-            openTab(showLibrary);
+            return signedIn(session.username);
         })
         .catch(err => {
-            error.textContent = err.message;
-            error.classList.remove("hidden");
+            showAuthError("login-error", err.message);
+        })
+        .finally(() => {
+            button.disabled = false;
+        });
+}
+
+function submitCreateAccount() {
+    const username = document.getElementById("create-username").value.trim();
+    const password = document.getElementById("create-password").value;
+    const confirm = document.getElementById("create-password-confirm").value;
+    const button = document.getElementById("create-account-submit");
+
+    hideAuthError("create-account-error");
+
+    if (createUsernameTaken) {
+        setCreateUsernameTaken(true);
+        return;
+    }
+
+    if (password !== confirm) {
+        showAuthError("create-account-error", "Those passwords do not match.");
+        return;
+    }
+
+    button.disabled = true;
+
+    fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+        .then(readJson)
+        .then(session => {
+            document.getElementById("create-password").value = "";
+            document.getElementById("create-password-confirm").value = "";
+            return signedIn(session.username);
+        })
+        .catch(err => {
+            showAuthError("create-account-error", err.message);
         })
         .finally(() => {
             button.disabled = false;
@@ -2399,11 +2509,23 @@ function submitLogin() {
 }
 
 function logout() {
-    fetch("/api/logout", { method: "POST" })
-        .catch(() => {})
-        .finally(() => {
-            forgetSession();
-        });
+    clearTimeout(preferencesTimer);
+
+    const flush = currentUser
+        ? fetch("/api/preferences", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(themePreferences())
+        }).catch(() => {})
+        : Promise.resolve();
+
+    flush.finally(() => {
+        fetch("/api/logout", { method: "POST" })
+            .catch(() => {})
+            .finally(() => {
+                forgetSession();
+            });
+    });
 }
 
 function restoreSession() {
@@ -2414,7 +2536,9 @@ function restoreSession() {
                 currentUser = { username: session.username };
                 updateAccountMenu();
                 currentView = showLibrary;
-                showLibrary();
+                loadAccountPreferences().finally(() => {
+                    showLibrary();
+                });
 
                 return;
             }
@@ -2436,6 +2560,35 @@ function wireLoginForm() {
     document.getElementById("login-form")?.addEventListener("submit", event => {
         event.preventDefault();
         submitLogin();
+    });
+
+    document.getElementById("create-account-form")?.addEventListener("submit", event => {
+        event.preventDefault();
+        submitCreateAccount();
+    });
+
+    const createUsername = document.getElementById("create-username");
+
+    createUsername?.addEventListener("input", () => {
+        setCreateUsernameTaken(false);
+        scheduleUsernameCheck();
+    });
+
+    createUsername?.addEventListener("blur", () => {
+        checkUsernameTaken();
+    });
+
+    document.getElementById("open-create-account")?.addEventListener("click", () => {
+        openView(showCreateAccount);
+    });
+
+    document.getElementById("open-login")?.addEventListener("click", () => {
+        if (viewHistory.length) {
+            goBack();
+            return;
+        }
+
+        openTab(showLogin);
     });
 
     document.getElementById("logout-button")?.addEventListener("click", logout);

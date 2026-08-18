@@ -184,24 +184,123 @@ function loadSettings() {
             return defaultSettings();
         }
 
-        const loaded = { ...defaultSettings(), ...JSON.parse(raw) };
-
-        if (LEGACY_PS3_GRADIENT_MAP[loaded.ps3Gradient]) {
-            loaded.ps3Gradient = LEGACY_PS3_GRADIENT_MAP[loaded.ps3Gradient];
-        }
-
-        if (!PS3_GRADIENTS.some(item => item.id === loaded.ps3Gradient)) {
-            loaded.ps3Gradient = "08_day";
-        }
-
-        return loaded;
+        return normalizeSettings({ ...defaultSettings(), ...JSON.parse(raw) });
     } catch (error) {
         return defaultSettings();
     }
 }
 
-function saveSettings() {
+function normalizeSettings(loaded) {
+    if (LEGACY_PS3_GRADIENT_MAP[loaded.ps3Gradient]) {
+        loaded.ps3Gradient = LEGACY_PS3_GRADIENT_MAP[loaded.ps3Gradient];
+    }
+
+    if (!PS3_GRADIENTS.some(item => item.id === loaded.ps3Gradient)) {
+        loaded.ps3Gradient = "08_day";
+    }
+
+    return loaded;
+}
+
+const THEME_PREFERENCE_KEYS = [
+    "mode",
+    "basicTheme",
+    "extremeTheme",
+    "ps3Gradient",
+    "oscilloscopeColor",
+    "win7Oscilloscope",
+    "hideExtremeWarning"
+];
+
+let preferencesTimer = null;
+
+function userSettingsKey(username) {
+    return `${SETTINGS_KEY}.${username}`;
+}
+
+function themePreferences() {
+    const prefs = {};
+
+    THEME_PREFERENCE_KEYS.forEach(key => {
+        prefs[key] = settings[key];
+    });
+
+    return prefs;
+}
+
+function hasThemePrefs(prefs) {
+    return THEME_PREFERENCE_KEYS.some(key => prefs[key] !== undefined);
+}
+
+function saveSettingsLocalOnly() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+    if (typeof currentUser !== "undefined" && currentUser) {
+        localStorage.setItem(
+            userSettingsKey(currentUser.username),
+            JSON.stringify(settings)
+        );
+    }
+}
+
+function saveSettings() {
+    saveSettingsLocalOnly();
+    schedulePreferencesSync();
+}
+
+function schedulePreferencesSync() {
+    if (typeof currentUser === "undefined" || !currentUser) {
+        return;
+    }
+
+    clearTimeout(preferencesTimer);
+    preferencesTimer = setTimeout(pushPreferences, 400);
+}
+
+function pushPreferences() {
+    if (typeof currentUser === "undefined" || !currentUser) {
+        return;
+    }
+
+    fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(themePreferences())
+    }).catch(() => {});
+}
+
+function applyLoadedSettings(loaded) {
+    settings = normalizeSettings({ ...defaultSettings(), ...loaded });
+    saveSettingsLocalOnly();
+    applyTheme();
+}
+
+function loadAccountPreferences() {
+    if (typeof currentUser === "undefined" || !currentUser) {
+        return Promise.resolve();
+    }
+
+    try {
+        const raw = localStorage.getItem(userSettingsKey(currentUser.username));
+
+        if (raw) {
+            applyLoadedSettings({ ...settings, ...JSON.parse(raw) });
+        }
+    } catch (error) {
+        // Keep whatever is already on screen.
+    }
+
+    return fetch("/api/preferences")
+        .then(readJson)
+        .then(prefs => {
+            if (hasThemePrefs(prefs)) {
+                applyLoadedSettings({ ...settings, ...prefs });
+                return;
+            }
+
+            pushPreferences();
+        })
+        .catch(() => {});
 }
 
 function hexToRgb(hex) {

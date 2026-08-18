@@ -7,12 +7,16 @@ from jellyfin_apiclient_python.exceptions import HTTPException as JellyfinError
 from client import (
     AppClient,
     InvalidCredentials,
+    RegistrationFailed,
+    RegistrationUnavailable,
     ServerUnreachable,
+    UserAlreadyExists,
     authorization_header,
     JELLYFIN_TIMEOUT
 )
 from pathlib import Path
 from pydantic import BaseModel
+import json
 import requests
 import secrets
 import threading
@@ -29,6 +33,16 @@ MAX_SEARCH_RESULTS = 60
 
 SESSION_COOKIE = "musicplayer_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30
+PREFERENCES_DIR = Path(__file__).parent / "data" / "preferences"
+PREFERENCE_KEYS = (
+    "mode",
+    "basicTheme",
+    "extremeTheme",
+    "ps3Gradient",
+    "oscilloscopeColor",
+    "win7Oscilloscope",
+    "hideExtremeWarning"
+)
 
 
 class NewPlaylist(BaseModel):
@@ -42,6 +56,16 @@ class PlaylistItems(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class Preferences(BaseModel):
+    mode: str | None = None
+    basicTheme: str | None = None
+    extremeTheme: str | None = None
+    ps3Gradient: str | None = None
+    oscilloscopeColor: str | None = None
+    win7Oscilloscope: str | None = None
+    hideExtremeWarning: bool | None = None
 
 
 def unreachable(error, client=None):
@@ -234,6 +258,46 @@ def drop_session(request: Request, response: Response):
     )
 
 
+def preferences_path(user_id):
+    safe = "".join(ch for ch in user_id if ch.isalnum() or ch in "-_")
+
+    if not safe or safe != user_id:
+        raise HTTPException(status_code=400, detail="Invalid user.")
+
+    return PREFERENCES_DIR / f"{safe}.json"
+
+
+def read_preferences(user_id):
+    path = preferences_path(user_id)
+
+    if not path.is_file():
+        return {}
+
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(loaded, dict):
+        return {}
+
+    return {
+        key: loaded[key]
+        for key in PREFERENCE_KEYS
+        if key in loaded
+    }
+
+
+def write_preferences(user_id, body: Preferences):
+    saved = read_preferences(user_id)
+    saved.update(body.model_dump(exclude_unset=True))
+
+    PREFERENCES_DIR.mkdir(parents=True, exist_ok=True)
+    preferences_path(user_id).write_text(json.dumps(saved, indent=2))
+
+    return saved
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -283,11 +347,83 @@ def login(body: LoginRequest, request: Request, response: Response):
     }
 
 
+@app.post("/api/register")
+def register(body: LoginRequest, request: Request, response: Response):
+    username = body.username.strip()
+    password = body.password
+
+    if not username:
+        raise HTTPException(status_code=400, detail="A username is required.")
+
+    if not password:
+        raise HTTPException(status_code=400, detail="A password is required.")
+
+    try:
+        identity = jellyfin.create_user(username, password)
+    except UserAlreadyExists:
+        raise HTTPException(
+            status_code=409,
+            detail="That username is already taken."
+        )
+    except RegistrationFailed as error:
+        raise HTTPException(status_code=400, detail=error.message)
+    except RegistrationUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Account creation is not available right now."
+        )
+    except (
+        ServerUnreachable,
+        JellyfinError,
+        requests.exceptions.RequestException
+    ) as error:
+        raise unreachable(error)
+
+    bind_session(response, request, identity)
+
+    return {
+        "logged_in": True,
+        "username": identity["username"]
+    }
+
+
+@app.get("/api/username-taken")
+def username_taken(username: str = ""):
+    name = username.strip()
+
+    if not name:
+        return {"taken": False}
+
+    try:
+        taken = jellyfin.username_taken(name)
+    except (
+        ServerUnreachable,
+        JellyfinError,
+        requests.exceptions.RequestException
+    ) as error:
+        raise unreachable(error)
+
+    return {"taken": taken}
+
+
 @app.post("/api/logout")
 def logout(request: Request, response: Response):
     drop_session(request, response)
 
     return {"logged_in": False}
+
+
+@app.get("/api/preferences")
+def get_preferences(client: AppClient = Depends(require_client)):
+    return read_preferences(client.user_id)
+
+
+@app.put("/api/preferences")
+def put_preferences(
+    body: Preferences,
+    client: AppClient = Depends(require_client)
+):
+    return write_preferences(client.user_id, body)
 
 
 @app.get("/api/albums")
