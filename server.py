@@ -7,6 +7,7 @@ from jellyfin_apiclient_python.exceptions import HTTPException as JellyfinError
 from client import (
     AppClient,
     InvalidCredentials,
+    PlaylistNotFound,
     RegistrationFailed,
     RegistrationUnavailable,
     ServerUnreachable,
@@ -98,6 +99,8 @@ def jellyfin_call(send, client=None):
     """Run a call against the Jellyfin client, turning failures into a 503."""
     try:
         return send()
+    except PlaylistNotFound:
+        raise HTTPException(status_code=404, detail="Playlist not found.")
     except (
         ServerUnreachable,
         JellyfinError,

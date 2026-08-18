@@ -55,6 +55,10 @@ class RegistrationFailed(Exception):
         super().__init__(message)
 
 
+class PlaylistNotFound(Exception):
+    """This user does not own that playlist, or it does not exist."""
+
+
 def read_candidates():
     """Server addresses to try, in order.
 
@@ -129,6 +133,7 @@ class AppClient:
         self.user_id = user_id
         self.access_token = access_token
         self._home = _home
+        self._privatized_playlists = set()
 
         if _home is not None:
             self.client_id = _home.client_id
@@ -545,24 +550,37 @@ class AppClient:
                 "Recursive": True,
                 "SortBy": "SortName",
                 "SortOrder": "Ascending",
-                "Fields": "Path"
+                "Fields": "Path,OwnerUserId"
             }
         )
 
-        return [
-            {
-                "id": playlist.get("Id"),
+        summaries = []
+
+        for playlist in response.get("Items") or []:
+            if is_sidecar_playlist(playlist):
+                continue
+
+            if not owned_by(playlist, self.user_id):
+                continue
+
+            playlist_id = playlist.get("Id")
+
+            self._privatize_playlist(playlist_id)
+
+            summaries.append({
+                "id": playlist_id,
                 "name": playlist.get("Name"),
-                "cover_url": image_url(playlist.get("Id"))
-            }
-            for playlist in response["Items"]
-            if not is_sidecar_playlist(playlist)
-        ]
+                "cover_url": image_url(playlist_id)
+            })
+
+        return summaries
 
     def get_playlist_tracks(self, playlist_id: str):
         # Playlists/{id}/Items rather than a ParentId query, so tracks come
         # back in the order the playlist puts them in, each with the entry id
         # that removing it later needs.
+        self._own_playlist(playlist_id)
+
         response = self._send(
             "GET",
             f"Playlists/{playlist_id}/Items",
@@ -581,6 +599,8 @@ class AppClient:
         ]
 
     def add_to_playlist(self, playlist_id: str, track_ids):
+        self._own_playlist(playlist_id)
+
         return self._send(
             "POST",
             f"Playlists/{playlist_id}/Items",
@@ -593,6 +613,8 @@ class AppClient:
     def remove_from_playlist(self, playlist_id: str, entry_ids):
         # Entries are addressed by PlaylistItemId, not by track id: the same
         # song can sit in a playlist more than once.
+        self._own_playlist(playlist_id)
+
         return self._send(
             "DELETE",
             f"Playlists/{playlist_id}/Items",
@@ -617,6 +639,8 @@ class AppClient:
     def set_playlist_image(self, playlist_id: str, image: bytes, media_type):
         # Jellyfin wants the image base64 encoded in the request body, with
         # the real image type still declared in the header.
+        self._own_playlist(playlist_id)
+
         return self._send(
             "POST",
             f"Items/{playlist_id}/Images/Primary",
@@ -634,11 +658,49 @@ class AppClient:
             body={
                 "Name": name,
                 "UserId": "{UserId}",
-                "MediaType": "Audio"
+                "MediaType": "Audio",
+                "Users": [],
+                "IsPublic": False
             }
         )
 
-        return {"id": response.get("Id"), "name": name}
+        playlist_id = response.get("Id")
+
+        self._privatize_playlist(playlist_id)
+
+        return {"id": playlist_id, "name": name}
+
+    def _own_playlist(self, playlist_id: str):
+        """Raise unless this playlist exists and belongs to the signed-in user."""
+        try:
+            item = self._send(
+                "GET",
+                f"Users/{{UserId}}/Items/{playlist_id}",
+                params={"Fields": "Path,OwnerUserId"}
+            )
+        except JellyfinError as error:
+            raise PlaylistNotFound() from error
+
+        if not item or is_sidecar_playlist(item) or not owned_by(item, self.user_id):
+            raise PlaylistNotFound()
+
+        return item
+
+    def _privatize_playlist(self, playlist_id: str):
+        """Jellyfin playlists default to public; lock each owned one once."""
+        if not playlist_id or playlist_id in self._privatized_playlists:
+            return
+
+        try:
+            self._send(
+                "POST",
+                f"Playlists/{playlist_id}",
+                body={"IsPublic": False, "Users": []}
+            )
+        except (JellyfinError, requests.exceptions.RequestException):
+            return
+
+        self._privatized_playlists.add(playlist_id)
 
 
 # Playlist files that album downloads often ship alongside the audio.
@@ -655,6 +717,23 @@ def is_sidecar_playlist(playlist):
     path = (playlist.get("Path") or "").lower()
 
     return path.endswith(SIDECAR_PLAYLIST_SUFFIXES)
+
+
+def same_id(left, right):
+    if not left or not right:
+        return False
+
+    return str(left).replace("-", "").casefold() == str(right).replace("-", "").casefold()
+
+
+def owned_by(item, user_id):
+    """Whether a Jellyfin item belongs to this user.
+
+    Playlists created in the app are owned by the signed-in user. Public
+    playlists from other accounts still appear in Users/Items, so ownership
+    is what keeps each person's list private.
+    """
+    return same_id(item.get("OwnerUserId"), user_id)
 
 
 TRACK_FIELDS = "ParentIndexNumber,RunTimeTicks,Path"

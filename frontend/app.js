@@ -2077,6 +2077,40 @@ function seedOscilloscopeParticles(width, height) {
     }
 }
 
+function waveformPoints(dataArray, width, centerY, pulse) {
+    const bufferLength = dataArray.length;
+    const pointCount = 256;
+    const smoothRadius = 3;
+    const heightScale = (0.9 + pulse * 0.22) * 0.8;
+    const points = [];
+
+    for (let p = 0; p < pointCount; p++) {
+        const index = Math.round(p * (bufferLength - 1) / (pointCount - 1));
+        let sum = 0;
+        let count = 0;
+
+        for (let k = -smoothRadius; k <= smoothRadius; k++) {
+            const sampleIndex = index + k;
+
+            if (sampleIndex >= 0 && sampleIndex < bufferLength) {
+                sum += (dataArray[sampleIndex] - 128) / 128;
+                count += 1;
+            }
+        }
+
+        const sample = count ? sum / count : 0;
+        const position = p / (pointCount - 1);
+        const envelope = Math.pow(Math.sin(Math.PI * position), 1.5);
+
+        points.push({
+            x: position * width,
+            y: centerY + sample * centerY * envelope * heightScale
+        });
+    }
+
+    return points;
+}
+
 function startOscilloscope() {
     setupAudioAnalyser();
 
@@ -2285,33 +2319,45 @@ function startOscilloscope() {
             ctx.fill();
         }
 
-        ctx.beginPath();
+        const points = waveformPoints(dataArray, width, centerY, pulse);
 
-        const sliceWidth = width / bufferLength;
-        let x = 0;
-
-        for (let i = 0; i < bufferLength; i++) {
-            const sample = (dataArray[i] - 128) / 128;
-            const position = i / (bufferLength - 1);
-            const envelope = Math.pow(Math.sin(Math.PI * position), 1.5);
-            const y = centerY + sample * centerY * envelope * (0.9 + pulse * 0.22);
-
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-
-            x += sliceWidth;
+        if (points.length < 2) {
+            return;
         }
 
-        ctx.lineWidth = 6 + pulse * 8;
-        ctx.strokeStyle = rgbCss(tone, 0.048 + pulse * 0.12);
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+
+        for (let i = 1; i < points.length - 1; i++) {
+            const midX = (points[i].x + points[i + 1].x) / 2;
+            const midY = (points[i].y + points[i + 1].y) / 2;
+
+            ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
+        }
+
+        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+
+        ctx.shadowColor = rgbCss(tone, 0.95);
+        ctx.shadowBlur = 22 + pulse * 14;
+        ctx.lineWidth = 9 + pulse * 5;
+        ctx.strokeStyle = rgbCss(tone, 0.42 + pulse * 0.18);
         ctx.stroke();
 
-        ctx.lineWidth = 2;
+        ctx.shadowBlur = 32 + pulse * 10;
+        ctx.lineWidth = 3;
         ctx.strokeStyle = rgbCss(tone, 1);
         ctx.stroke();
+
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = 1.15;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = "transparent";
     }
 
 
