@@ -27,12 +27,21 @@ if (target === "win") {
   process.exit(1);
 }
 
-if (dryRun) {
-  console.log("Would run:", command, args.join(" "));
-  process.exit(0);
+let electronBuilderCli;
+try {
+  electronBuilderCli = require.resolve("electron-builder/cli.js");
+} catch (err) {
+  if (err && err.code === "MODULE_NOT_FOUND") {
+    console.error("electron-builder is not installed. Run `npm install` and try again.");
+    process.exit(1);
+  }
+  throw err;
 }
 
-const electronBuilderCli = require.resolve("electron-builder/cli.js");
+if (dryRun) {
+  console.log("Would run:", process.execPath, electronBuilderCli, args.join(" "));
+  process.exit(0);
+}
 
 console.log(`Building ${target} release...`);
 const result = spawnSync(process.execPath, [electronBuilderCli, ...args], {

@@ -67,6 +67,7 @@ let oscilloscopeEnergyFast = 0;
 let oscilloscopePulse = 0;
 let oscilloscopeWidth = 0;
 let oscilloscopeHeight = 0;
+let oscilloscopePixelRatio = 0;
 
 if (navigator.userAgent.includes("Electron")) {
     document.body.classList.add("desktop");
@@ -1164,6 +1165,10 @@ function showPanel(name) {
     } else {
         visualizerPanel.classList.add("open");
 
+        if (window.Ps3XmbRuntime?.setVisualizerActive) {
+            window.Ps3XmbRuntime.setVisualizerActive(true);
+        }
+
         startOscilloscope();
     }
 
@@ -1177,6 +1182,10 @@ function showPanel(name) {
 function closePanel() {
     if (openPanel === "visualizer") {
         stopOscilloscope();
+
+        if (window.Ps3XmbRuntime?.setVisualizerActive) {
+            window.Ps3XmbRuntime.setVisualizerActive(false);
+        }
     }
 
     openPanel = null;
@@ -2040,7 +2049,7 @@ function setupAudioAnalyser() {
 
     analyser = audioContext.createAnalyser();
 
-    analyser.fftSize = 2048;
+    analyser.fftSize = window.GraphicsProfile?.current?.oscilloscope?.fftSize || 2048;
 
     audioSource.connect(analyser);
 
@@ -2048,8 +2057,12 @@ function setupAudioAnalyser() {
 }
 
 function seedOscilloscopeParticles(width, height) {
+    const profile = window.GraphicsProfile?.current?.oscilloscope || {};
     const area = width * height;
-    const count = Math.min(180, Math.max(60, Math.round(area / 8500)));
+    const minParticles = profile.minParticles || 60;
+    const maxParticles = profile.maxParticles || 180;
+    const particleArea = profile.particleArea || 8500;
+    const count = Math.min(maxParticles, Math.max(minParticles, Math.round(area / particleArea)));
     const centerX = width / 2;
     const centerY = height / 2;
     const spreadX = width * 0.42;
@@ -2078,9 +2091,10 @@ function seedOscilloscopeParticles(width, height) {
 }
 
 function waveformPoints(dataArray, width, centerY, pulse) {
+    const profile = window.GraphicsProfile?.current?.oscilloscope || {};
     const bufferLength = dataArray.length;
-    const pointCount = 256;
-    const smoothRadius = 3;
+    const pointCount = profile.waveformPoints || 256;
+    const smoothRadius = profile.smoothRadius || 3;
     const heightScale = (0.9 + pulse * 0.22) * 0.8;
     const points = [];
 
@@ -2118,9 +2132,15 @@ function startOscilloscope() {
 
     const ctx = canvas.getContext("2d");
 
+    const profile = window.GraphicsProfile?.current?.oscilloscope || {};
+    const targetFrameMs = 1000 / Math.max(1, profile.fps || 60);
+    const maxPixelRatio = profile.maxPixelRatio || 2;
+    const maxShockwaves = profile.maxShockwaves || 4;
+    const fullGlow = profile.fullGlow !== false;
     const bufferLength = analyser.fftSize;
 
     const dataArray = new Uint8Array(bufferLength);
+    let lastDrawMs = -Infinity;
 
     oscilloscopeEnergySlow = 0;
     oscilloscopeEnergyFast = 0;
@@ -2135,18 +2155,28 @@ function startOscilloscope() {
 
         oscilloscopeAnimationId = requestAnimationFrame(draw);
 
+        if (now - lastDrawMs < targetFrameMs * 0.9) {
+            return;
+        }
+
+        lastDrawMs = now;
+
         const rect = canvas.getBoundingClientRect();
         const width = rect.width;
         const height = rect.height;
-        const pixelRatio = window.devicePixelRatio || 1;
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
 
         if (width < 8 || height < 8) {
             return;
         }
 
-        if (width !== oscilloscopeWidth || height !== oscilloscopeHeight) {
-            canvas.width = width * pixelRatio;
-            canvas.height = height * pixelRatio;
+        if (
+            width !== oscilloscopeWidth ||
+            height !== oscilloscopeHeight ||
+            pixelRatio !== oscilloscopePixelRatio
+        ) {
+            canvas.width = Math.floor(width * pixelRatio);
+            canvas.height = Math.floor(height * pixelRatio);
 
             ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
@@ -2168,6 +2198,7 @@ function startOscilloscope() {
 
             oscilloscopeWidth = width;
             oscilloscopeHeight = height;
+            oscilloscopePixelRatio = pixelRatio;
         }
 
         analyser.getByteTimeDomainData(dataArray);
@@ -2201,7 +2232,7 @@ function startOscilloscope() {
         if (onset > 0.07) {
             oscilloscopePulse = Math.min(1, oscilloscopePulse + onset * 2.6);
 
-            if (onset > 0.11 && oscilloscopeShockwaves.length < 4) {
+            if (onset > 0.11 && oscilloscopeShockwaves.length < maxShockwaves) {
                 oscilloscopeShockwaves.push({
                     radius: 18,
                     alpha: 0.13 + onset * 0.33,
@@ -2340,21 +2371,34 @@ function startOscilloscope() {
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
 
-        ctx.shadowColor = rgbCss(tone, 0.95);
-        ctx.shadowBlur = 22 + pulse * 14;
-        ctx.lineWidth = 9 + pulse * 5;
-        ctx.strokeStyle = rgbCss(tone, 0.42 + pulse * 0.18);
-        ctx.stroke();
+        if (fullGlow) {
+            ctx.shadowColor = rgbCss(tone, 0.95);
+            ctx.shadowBlur = 22 + pulse * 14;
+            ctx.lineWidth = 9 + pulse * 5;
+            ctx.strokeStyle = rgbCss(tone, 0.42 + pulse * 0.18);
+            ctx.stroke();
 
-        ctx.shadowBlur = 32 + pulse * 10;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = rgbCss(tone, 1);
-        ctx.stroke();
+            ctx.shadowBlur = 32 + pulse * 10;
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = rgbCss(tone, 1);
+            ctx.stroke();
 
-        ctx.shadowBlur = 10;
-        ctx.lineWidth = 1.15;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-        ctx.stroke();
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 1.15;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+            ctx.stroke();
+        } else {
+            ctx.shadowColor = rgbCss(tone, 0.8);
+            ctx.shadowBlur = 8 + pulse * 6;
+            ctx.lineWidth = 4 + pulse * 2;
+            ctx.strokeStyle = rgbCss(tone, 0.86);
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+            ctx.lineWidth = 1.1;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.78)";
+            ctx.stroke();
+        }
 
         ctx.shadowBlur = 0;
         ctx.shadowColor = "transparent";
@@ -2373,6 +2417,7 @@ function stopOscilloscope() {
 
     oscilloscopeWidth = 0;
     oscilloscopeHeight = 0;
+    oscilloscopePixelRatio = 0;
     oscilloscopeParticles = [];
     oscilloscopeShockwaves = [];
 }

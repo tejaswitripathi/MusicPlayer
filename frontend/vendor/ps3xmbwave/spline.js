@@ -260,12 +260,20 @@
     );
 
     const bgVAO = createFullscreenQuad(gl, bgProg);
-    const grid = createGrid(gl, waveProg, 100);
+    const profile = window.GraphicsProfile?.current?.ps3 || {};
+    const grid = createGrid(gl, waveProg, profile.gridResolution || 100);
 
-    const STEX_W = 256;
-    const STEX_H = 64;
+    const STEX_W = profile.splineTextureWidth || 256;
+    const STEX_H = profile.splineTextureHeight || 64;
+    const STEX_UPDATE_SEC = (
+      profile.splineTextureHz &&
+      profile.splineTextureHz < (profile.fps || 60)
+    )
+      ? 1 / Math.max(1, profile.splineTextureHz)
+      : 0;
     const splineData = new Float32Array(STEX_W * STEX_H);
     const splineTex = gl.createTexture();
+    let lastSplineTextureTimeSec = -Infinity;
 
     gl.bindTexture(gl.TEXTURE_2D, splineTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -312,10 +320,15 @@
     };
 
     function updateSplineTexture(timeSec) {
+      if (STEX_UPDATE_SEC > 0 && timeSec - lastSplineTextureTimeSec < STEX_UPDATE_SEC) {
+        return;
+      }
+
       const state = reversePipeline.writeDisplacementTexture(settings, timeSec, splineData, STEX_W, STEX_H);
       gl.bindTexture(gl.TEXTURE_2D, splineTex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, STEX_W, STEX_H, gl.RED, gl.FLOAT, splineData);
       window.__PS3_REVERSE_STATE = state;
+      lastSplineTextureTimeSec = timeSec;
     }
 
     function render(timeSec) {

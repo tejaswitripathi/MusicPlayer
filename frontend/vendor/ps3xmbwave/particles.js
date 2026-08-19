@@ -117,7 +117,9 @@
     };
 
     function render(timeSec) {
-      const desiredCount = Math.max(1, settings.count | 0);
+      const profileCount = window.GraphicsProfile?.current?.ps3?.particleCount;
+      const rawCount = Math.max(1, settings.count | 0);
+      const desiredCount = profileCount ? Math.min(rawCount, profileCount) : rawCount;
       if (desiredCount !== count) rebuildParticles(desiredCount);
 
       const aspect = canvas.width / canvas.height;

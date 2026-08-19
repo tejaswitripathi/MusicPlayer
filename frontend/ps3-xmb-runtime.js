@@ -12,13 +12,28 @@ window.Ps3XmbRuntime = (function () {
     let splineTimeSec = 0;
     let particlesTimeSec = 0;
     let resizeBound = false;
+    let visualizerActive = false;
+
+    function profile() {
+        return window.GraphicsProfile?.current?.ps3 || {};
+    }
+
+    function targetFps() {
+        const ps3Profile = profile();
+        const fps = visualizerActive ? ps3Profile.visualizerFps : ps3Profile.fps;
+
+        return Math.max(1, fps || 60);
+    }
 
     function resize() {
         if (!canvas || !gl) {
             return;
         }
 
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const ps3Profile = profile();
+        const maxPixelRatio = ps3Profile.maxPixelRatio || 2;
+        const renderScale = ps3Profile.renderScale || 1;
+        const ratio = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * renderScale;
         const width = Math.max(1, window.innerWidth);
         const height = Math.max(1, window.innerHeight);
 
@@ -53,7 +68,7 @@ window.Ps3XmbRuntime = (function () {
         }
 
         gl = canvas.getContext("webgl2", {
-            antialias: true,
+            antialias: profile().antialias !== false,
             alpha: false,
             powerPreference: "high-performance"
         });
@@ -93,9 +108,14 @@ window.Ps3XmbRuntime = (function () {
 
         animationId = requestAnimationFrame(frame);
 
-        const dtSec = Math.max(0, (nowMs - prevFrameMs) / 1000);
+        const elapsedMs = nowMs - prevFrameMs;
+
+        if (elapsedMs < (1000 / targetFps()) * 0.9) {
+            return;
+        }
 
         prevFrameMs = nowMs;
+        const dtSec = Math.max(0, elapsedMs / 1000);
         splineTimeSec += dtSec;
         particlesTimeSec += dtSec;
 
@@ -139,6 +159,9 @@ window.Ps3XmbRuntime = (function () {
         start: start,
         stop: stop,
         setGradientPreset: setGradientPreset,
-        resize: resize
+        resize: resize,
+        setVisualizerActive: value => {
+            visualizerActive = Boolean(value);
+        }
     };
 })();

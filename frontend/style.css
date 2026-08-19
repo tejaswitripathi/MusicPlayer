@@ -337,6 +337,11 @@ body.oscope-open.theme-backdrop-blur {
     --theme-backdrop-blur: 28px;
 }
 
+body.graphics-low-power.theme-backdrop-blur,
+body.graphics-low-power.oscope-open.theme-backdrop-blur {
+    --theme-backdrop-blur: 0px;
+}
+
 .win7-bubble {
     position: absolute;
 
