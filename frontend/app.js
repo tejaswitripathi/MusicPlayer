@@ -2230,7 +2230,7 @@ function oscilloscopeColumnValues(dataArray, pointCount, smoothRadius, smoothing
 
 function drawDottedOscilloscope(ctx, dataArray, width, height, tone, profile) {
     const lowPower = window.GraphicsProfile?.current?.lowPower === true;
-    const pointCount = lowPower ? 72 : 128;
+    const pointCount = lowPower ? 84 : 144;
     const smoothRadius = profile.smoothRadius ?? 2;
     const values = oscilloscopeColumnValues(
         dataArray,
@@ -2239,30 +2239,49 @@ function drawDottedOscilloscope(ctx, dataArray, width, height, tone, profile) {
         lowPower ? 0.42 : 0.34
     );
     const centerY = height / 2;
-    const heightScale = centerY * 0.72;
+    const heightScale = centerY * 0.98;
     const step = width / pointCount;
-    const radius = lowPower ? 1.55 : 1.85;
+    const radius = lowPower ? 1.6 : 1.95;
     const dotGap = radius * 2.75;
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = rgbCss(tone, 0.56);
 
-    for (let p = 0; p < pointCount; p++) {
-        const position = p / (pointCount - 1);
-        const envelope = Math.sin(Math.PI * position);
-        const amplitude = values[p] * heightScale * envelope;
-        const x = p * step + step * 0.5;
-        const dotCount = Math.max(1, Math.floor(Math.abs(amplitude) / dotGap));
-        const direction = amplitude >= 0 ? 1 : -1;
+    function drawDots(alpha, blur) {
+        ctx.fillStyle = rgbCss(tone, alpha);
+        ctx.shadowColor = rgbCss(tone, 0.9);
+        ctx.shadowBlur = blur;
 
-        for (let dot = 0; dot <= dotCount; dot++) {
-            const y = centerY + direction * dot * dotGap;
+        for (let p = 0; p < pointCount; p++) {
+            const position = p / (pointCount - 1);
+            const envelope = Math.sin(Math.PI * position);
+            const amplitude = values[p] * heightScale * envelope;
+            const x = p * step + step * 0.5;
+            const dotCount = Math.max(1, Math.floor(Math.abs(amplitude) / dotGap));
+            const direction = amplitude >= 0 ? 1 : -1;
 
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fill();
+            for (let dot = 0; dot <= dotCount; dot++) {
+                const y = centerY + direction * dot * dotGap;
+
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
+
+    drawDots(0.28, lowPower ? 7 : 12);
+    drawDots(0.58, 0);
+
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+}
+
+function fftFallSmoothing(lowPower) {
+    return lowPower ? 0.985 : 0.94;
+}
+
+function fftRiseSmoothing(lowPower) {
+    return lowPower ? 0.55 : 0.46;
 }
 
 function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
@@ -2271,8 +2290,8 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     const binCount = dots
         ? (lowPower ? 72 : 128)
         : (lowPower ? 18 : 32);
-    const riseSmoothing = lowPower ? 0.5 : 0.4;
-    const fallSmoothing = lowPower ? 0.88 : 0.78;
+    const riseSmoothing = fftRiseSmoothing(lowPower);
+    const fallSmoothing = fftFallSmoothing(lowPower);
     const bottom = height * 0.76;
     const maxBarHeight = height * 0.62;
 
