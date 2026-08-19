@@ -342,6 +342,19 @@ body.graphics-low-power.oscope-open.theme-backdrop-blur {
     --theme-backdrop-blur: 0px;
 }
 
+body.graphics-low-power #top-bar,
+body.graphics-low-power #player-bar,
+body.graphics-low-power #queue-panel,
+body.graphics-low-power #win7-oscope-toggle .chip {
+    backdrop-filter: none !important;
+}
+
+body.graphics-low-power .player-panel,
+body.graphics-low-power .tab,
+body.graphics-low-power .filter {
+    transition: none;
+}
+
 .win7-bubble {
     position: absolute;
 

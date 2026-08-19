@@ -282,7 +282,29 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, STEX_W, STEX_H, 0, gl.RED, gl.FLOAT, splineData);
 
-    const reversePipeline = window.PS3SplineReverse.createPipeline();
+    const reversePipeline = profile.simpleDisplacement
+      ? null
+      : window.PS3SplineReverse.createPipeline();
+
+    function writeSimpleDisplacementTexture(timeSec) {
+      const flow = timeSec * settings.flowSpeed * settings.timeStep;
+
+      for (let row = 0; row < STEX_H; row++) {
+        const z = (row / Math.max(1, STEX_H - 1)) * 2 - 1;
+        const rowBase = row * STEX_W;
+        const rowEnvelope = 0.72 + 0.28 * Math.cos(z * Math.PI * 0.5);
+
+        for (let xi = 0; xi < STEX_W; xi++) {
+          const x = xi / Math.max(1, STEX_W - 1);
+          const edge = Math.sin(Math.PI * x);
+          const primary = Math.sin(x * 7.2 + z * 1.35 - flow * 1.7) * 0.07;
+          const secondary = Math.sin(x * 15.0 - z * 2.2 + flow * 0.9) * 0.022;
+          const shimmer = Math.cos(x * 23.0 + z * 3.0 - flow * 0.55) * 0.01;
+
+          splineData[rowBase + xi] = (primary + secondary + shimmer) * rowEnvelope * edge;
+        }
+      }
+    }
 
     const bgU = {
       colorStart: uloc(gl, bgProg, 'uColorStart'),
@@ -324,7 +346,14 @@
         return;
       }
 
-      const state = reversePipeline.writeDisplacementTexture(settings, timeSec, splineData, STEX_W, STEX_H);
+      let state = null;
+
+      if (reversePipeline) {
+        state = reversePipeline.writeDisplacementTexture(settings, timeSec, splineData, STEX_W, STEX_H);
+      } else {
+        writeSimpleDisplacementTexture(timeSec);
+      }
+
       gl.bindTexture(gl.TEXTURE_2D, splineTex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, STEX_W, STEX_H, gl.RED, gl.FLOAT, splineData);
       window.__PS3_REVERSE_STATE = state;

@@ -37,8 +37,15 @@ function graphicsProfile() {
     return null;
 }
 
+const ACTIVE_GRAPHICS_PROFILE = graphicsProfile();
+
+if (ACTIVE_GRAPHICS_PROFILE === "pi") {
+    app.commandLine.appendSwitch("force-device-scale-factor", "1");
+    app.commandLine.appendSwitch("high-dpi-support", "1");
+}
+
 function loadUrl() {
-    const profile = graphicsProfile();
+    const profile = ACTIVE_GRAPHICS_PROFILE;
 
     if (!profile) {
         return BASE_URL;
@@ -57,12 +64,33 @@ function loadUrl() {
     }
 }
 
-function createWindow() {
-    mainWindow = new BrowserWindow({
+function windowBounds() {
+    if (ACTIVE_GRAPHICS_PROFILE === "pi") {
+        return {
+            width: 1280,
+            height: 720,
+            minWidth: 800,
+            minHeight: 480
+        };
+    }
+
+    return {
         width: 1180,
         height: 800,
         minWidth: 820,
-        minHeight: 560,
+        minHeight: 560
+    };
+}
+
+function createWindow() {
+    const bounds = windowBounds();
+
+    mainWindow = new BrowserWindow({
+        width: bounds.width,
+        height: bounds.height,
+        minWidth: bounds.minWidth,
+        minHeight: bounds.minHeight,
+        useContentSize: ACTIVE_GRAPHICS_PROFILE === "pi",
 
         backgroundColor: "#111111",
         title: "MusicPlayer",

@@ -18,6 +18,10 @@ window.Ps3XmbRuntime = (function () {
         return window.GraphicsProfile?.current?.ps3 || {};
     }
 
+    function rootProfile() {
+        return window.GraphicsProfile?.current || {};
+    }
+
     function targetFps() {
         const ps3Profile = profile();
         const fps = visualizerActive ? ps3Profile.visualizerFps : ps3Profile.fps;
@@ -30,12 +34,23 @@ window.Ps3XmbRuntime = (function () {
             return;
         }
 
+        const appProfile = rootProfile();
         const ps3Profile = profile();
         const maxPixelRatio = ps3Profile.maxPixelRatio || 2;
         const renderScale = ps3Profile.renderScale || 1;
-        const ratio = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * renderScale;
         const width = Math.max(1, window.innerWidth);
         const height = Math.max(1, window.innerHeight);
+        let ratio = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * renderScale;
+
+        if (appProfile.maxRenderWidth) {
+            ratio = Math.min(ratio, appProfile.maxRenderWidth / width);
+        }
+
+        if (appProfile.maxRenderHeight) {
+            ratio = Math.min(ratio, appProfile.maxRenderHeight / height);
+        }
+
+        ratio = Math.max(0.1, ratio);
 
         canvas.width = Math.floor(width * ratio);
         canvas.height = Math.floor(height * ratio);
@@ -82,7 +97,9 @@ window.Ps3XmbRuntime = (function () {
         gl.getExtension("EXT_color_buffer_float");
 
         splineLayer = window.createSplineLayer(gl, canvas);
-        particlesLayer = window.createParticlesLayer(gl, canvas);
+        particlesLayer = profile().drawParticles === false
+            ? { render() {} }
+            : window.createParticlesLayer(gl, canvas);
 
         particlesTimeSec = Math.random() * 1000;
         ready = true;

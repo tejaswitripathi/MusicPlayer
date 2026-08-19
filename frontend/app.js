@@ -68,6 +68,7 @@ let oscilloscopePulse = 0;
 let oscilloscopeWidth = 0;
 let oscilloscopeHeight = 0;
 let oscilloscopePixelRatio = 0;
+let oscilloscopeSmoothedWave = null;
 
 if (navigator.userAgent.includes("Electron")) {
     document.body.classList.add("desktop");
@@ -2059,9 +2060,9 @@ function setupAudioAnalyser() {
 function seedOscilloscopeParticles(width, height) {
     const profile = window.GraphicsProfile?.current?.oscilloscope || {};
     const area = width * height;
-    const minParticles = profile.minParticles || 60;
-    const maxParticles = profile.maxParticles || 180;
-    const particleArea = profile.particleArea || 8500;
+    const minParticles = profile.minParticles ?? 60;
+    const maxParticles = profile.maxParticles ?? 180;
+    const particleArea = profile.particleArea ?? 8500;
     const count = Math.min(maxParticles, Math.max(minParticles, Math.round(area / particleArea)));
     const centerX = width / 2;
     const centerY = height / 2;
@@ -2093,8 +2094,8 @@ function seedOscilloscopeParticles(width, height) {
 function waveformPoints(dataArray, width, centerY, pulse) {
     const profile = window.GraphicsProfile?.current?.oscilloscope || {};
     const bufferLength = dataArray.length;
-    const pointCount = profile.waveformPoints || 256;
-    const smoothRadius = profile.smoothRadius || 3;
+    const pointCount = profile.waveformPoints ?? 256;
+    const smoothRadius = profile.smoothRadius ?? 3;
     const heightScale = (0.9 + pulse * 0.22) * 0.8;
     const points = [];
 
@@ -2125,6 +2126,71 @@ function waveformPoints(dataArray, width, centerY, pulse) {
     return points;
 }
 
+function drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile) {
+    const bufferLength = dataArray.length;
+    const pointCount = profile.waveformPoints ?? 96;
+    const smoothRadius = profile.smoothRadius ?? 2;
+    const smoothing = profile.smoothing ?? 0.34;
+    const centerY = height / 2;
+    const heightScale = centerY * 0.72;
+
+    if (!oscilloscopeSmoothedWave || oscilloscopeSmoothedWave.length !== pointCount) {
+        oscilloscopeSmoothedWave = new Float32Array(pointCount);
+    }
+
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+
+    let prevX = 0;
+    let prevY = centerY;
+
+    for (let p = 0; p < pointCount; p++) {
+        const index = Math.round(p * (bufferLength - 1) / (pointCount - 1));
+        let sum = 0;
+        let count = 0;
+
+        for (let k = -smoothRadius; k <= smoothRadius; k++) {
+            const sampleIndex = index + k;
+
+            if (sampleIndex >= 0 && sampleIndex < bufferLength) {
+                sum += (dataArray[sampleIndex] - 128) / 128;
+                count += 1;
+            }
+        }
+
+        const target = count ? sum / count : 0;
+
+        oscilloscopeSmoothedWave[p] += (target - oscilloscopeSmoothedWave[p]) * smoothing;
+
+        const position = p / (pointCount - 1);
+        const envelope = Math.sin(Math.PI * position);
+        const x = position * width;
+        const y = centerY + oscilloscopeSmoothedWave[p] * heightScale * envelope;
+
+        if (p === 0) {
+            ctx.moveTo(x, y);
+        } else if (p === pointCount - 1) {
+            ctx.quadraticCurveTo(prevX, prevY, x, y);
+        } else {
+            ctx.quadraticCurveTo(prevX, prevY, (prevX + x) * 0.5, (prevY + y) * 0.5);
+        }
+
+        prevX = x;
+        prevY = y;
+    }
+
+    ctx.strokeStyle = rgbCss(tone, 0.9);
+    ctx.lineWidth = 3.2;
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.62)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
 function startOscilloscope() {
     setupAudioAnalyser();
 
@@ -2132,11 +2198,13 @@ function startOscilloscope() {
 
     const ctx = canvas.getContext("2d");
 
+    const appProfile = window.GraphicsProfile?.current || {};
     const profile = window.GraphicsProfile?.current?.oscilloscope || {};
     const targetFrameMs = 1000 / Math.max(1, profile.fps || 60);
-    const maxPixelRatio = profile.maxPixelRatio || 2;
-    const maxShockwaves = profile.maxShockwaves || 4;
+    const maxPixelRatio = profile.maxPixelRatio ?? 2;
+    const maxShockwaves = profile.maxShockwaves ?? 4;
     const fullGlow = profile.fullGlow !== false;
+    const simpleCurve = profile.simpleCurve === true;
     const bufferLength = analyser.fftSize;
 
     const dataArray = new Uint8Array(bufferLength);
@@ -2164,7 +2232,17 @@ function startOscilloscope() {
         const rect = canvas.getBoundingClientRect();
         const width = rect.width;
         const height = rect.height;
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
+        let pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
+
+        if (appProfile.maxRenderWidth) {
+            pixelRatio = Math.min(pixelRatio, appProfile.maxRenderWidth / width);
+        }
+
+        if (appProfile.maxRenderHeight) {
+            pixelRatio = Math.min(pixelRatio, appProfile.maxRenderHeight / height);
+        }
+
+        pixelRatio = Math.max(0.1, pixelRatio);
 
         if (width < 8 || height < 8) {
             return;
@@ -2180,7 +2258,10 @@ function startOscilloscope() {
 
             ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
-            if (
+            if (simpleCurve) {
+                oscilloscopeParticles = [];
+                oscilloscopeShockwaves = [];
+            } else if (
                 oscilloscopeParticles.length === 0 ||
                 oscilloscopeWidth < 8 ||
                 oscilloscopeHeight < 8
@@ -2202,6 +2283,16 @@ function startOscilloscope() {
         }
 
         analyser.getByteTimeDomainData(dataArray);
+
+        const tone = typeof currentOscilloscopeRgb === "function"
+            ? currentOscilloscopeRgb()
+            : { r: 255, g: 255, b: 255 };
+
+        if (simpleCurve) {
+            drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile);
+
+            return;
+        }
 
         let sumSquares = 0;
         let peak = 0;
@@ -2247,10 +2338,6 @@ function startOscilloscope() {
         const pulse = oscilloscopePulse;
         const centerX = width / 2;
         const centerY = height / 2;
-        const tone = typeof currentOscilloscopeRgb === "function"
-            ? currentOscilloscopeRgb()
-            : { r: 255, g: 255, b: 255 };
-
         ctx.clearRect(0, 0, width, height);
 
         // Elliptical bloom whose alpha hits 0 at the gradient edge, so
@@ -2420,6 +2507,7 @@ function stopOscilloscope() {
     oscilloscopePixelRatio = 0;
     oscilloscopeParticles = [];
     oscilloscopeShockwaves = [];
+    oscilloscopeSmoothedWave = null;
 }
 
 
