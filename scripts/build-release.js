@@ -9,19 +9,18 @@ const target = process.argv.includes("--target")
       : "";
 
 const dryRun = process.argv.includes("--dry-run");
-const command = process.platform === "win32" ? "npx" : "npx";
-const args = ["electron-builder"];
+const args = [];
 
 if (target === "win") {
   args.push("--win");
 } else if (target === "mac") {
   args.push("--mac");
 } else if (target === "linux") {
-  args.push("--linux");
+  args.push("--linux", "tar.xz");
 } else if (target === "pi") {
-  args.push("--linux", "--arm64");
+  args.push("--linux", "tar.xz", "--arm64");
 } else if (target === "all") {
-  args.push("--win", "--mac", "--linux");
+  args.push("--win", "--mac", "--linux", "tar.xz");
 } else {
   console.error("Usage: node scripts/build-release.js --target win|mac|linux|pi|all [--dry-run]");
   console.error("Current platform:", process.platform);
@@ -33,10 +32,11 @@ if (dryRun) {
   process.exit(0);
 }
 
+const electronBuilderCli = require.resolve("electron-builder/cli.js");
+
 console.log(`Building ${target} release...`);
-const result = spawnSync(command, args, {
-  stdio: "inherit",
-  shell: true
+const result = spawnSync(process.execPath, [electronBuilderCli, ...args], {
+  stdio: "inherit"
 });
 
 if (result.error) {

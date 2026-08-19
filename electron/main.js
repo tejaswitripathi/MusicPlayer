@@ -2,7 +2,7 @@ const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_BASE_URL = "https://pieces-either-surgeons-seed.trycloudflare.com";
+const DEFAULT_BASE_URL = "https://commission-clip-shade-instead.trycloudflare.com";
 const CONFIG_FILE = path.join(app.getPath("userData"), "musicplayer-config.json");
 
 function readConfiguredBaseUrl() {
