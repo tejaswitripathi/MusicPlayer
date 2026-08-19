@@ -322,8 +322,8 @@
                     <span class="settings-row-label">Themes</span>
                     <span class="settings-row-chevron">›</span>
                 </button>
-                <button type="button" class="settings-row" id="open-oscilloscope-color">
-                    <span class="settings-row-label">Oscilloscope</span>
+                <button type="button" class="settings-row" id="open-visualizers">
+                    <span class="settings-row-label">Visualizers</span>
                     <span class="settings-row-chevron">›</span>
                 </button>
             </div>
@@ -369,6 +369,34 @@
             <h1 class="page-title">Extreme</h1>
 
             <div id="extreme-theme-grid" class="theme-preview-grid"></div>
+
+        </section>
+
+        <section id="visualizers-page" class="page hidden">
+
+            <button class="back-button">← Back</button>
+
+            <p class="page-kind">Personalization</p>
+            <h1 class="page-title">Visualizers</h1>
+
+            <div class="settings-list" id="visualizer-options">
+                <button type="button" class="settings-row" data-visualizer-type="oscilloscope">
+                    <span class="settings-row-label">Oscilloscope</span>
+                    <span class="settings-row-check">✓</span>
+                </button>
+                <button type="button" class="settings-row" data-visualizer-type="fft-bars">
+                    <span class="settings-row-label">FFT histogram (bars)</span>
+                    <span class="settings-row-check">✓</span>
+                </button>
+                <button type="button" class="settings-row" data-visualizer-type="fft-dots">
+                    <span class="settings-row-label">FFT histogram (dots)</span>
+                    <span class="settings-row-check">✓</span>
+                </button>
+                <button type="button" class="settings-row" id="open-oscilloscope-color">
+                    <span class="settings-row-label">Oscilloscope color</span>
+                    <span class="settings-row-chevron">›</span>
+                </button>
+            </div>
 
         </section>
 

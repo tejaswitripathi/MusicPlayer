@@ -329,6 +329,10 @@ body.theme-extreme-ps3 #ps3-waves {
     display: block;
 }
 
+#ps3-waves.ps3-paused {
+    display: none !important;
+}
+
 body.theme-backdrop-blur {
     --theme-backdrop-blur: 18px;
 }
@@ -1748,10 +1752,25 @@ body.oscope-open #top-bar {
     background-color: var(--surface-hover);
 }
 
+.settings-row.selected {
+    border-color: var(--accent);
+}
+
 .settings-row-chevron {
     color: var(--text-muted);
     font-size: 22px;
     line-height: 1;
+}
+
+.settings-row-check {
+    color: var(--accent);
+    font-size: 18px;
+    font-weight: bold;
+    opacity: 0;
+}
+
+.settings-row.selected .settings-row-check {
+    opacity: 1;
 }
 
 .settings-hint {

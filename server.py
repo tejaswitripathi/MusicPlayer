@@ -40,6 +40,7 @@ PREFERENCE_KEYS = (
     "basicTheme",
     "extremeTheme",
     "ps3Gradient",
+    "visualizerType",
     "oscilloscopeColor",
     "win7Oscilloscope",
     "hideExtremeWarning"
@@ -64,6 +65,7 @@ class Preferences(BaseModel):
     basicTheme: str | None = None
     extremeTheme: str | None = None
     ps3Gradient: str | None = None
+    visualizerType: str | None = None
     oscilloscopeColor: str | None = None
     win7Oscilloscope: str | None = None
     hideExtremeWarning: bool | None = None

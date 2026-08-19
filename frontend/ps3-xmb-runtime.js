@@ -13,6 +13,8 @@ window.Ps3XmbRuntime = (function () {
     let particlesTimeSec = 0;
     let resizeBound = false;
     let visualizerActive = false;
+    let currentGradientPreset = "08_day";
+    let suspendedForVisualizer = false;
 
     function profile() {
         return window.GraphicsProfile?.current?.ps3 || {};
@@ -141,8 +143,10 @@ window.Ps3XmbRuntime = (function () {
     }
 
     function setGradientPreset(key) {
+        currentGradientPreset = key || "08_day";
+
         if (window.SPLINE_SETTINGS) {
-            window.SPLINE_SETTINGS.gradientPreset = key || "08_day";
+            window.SPLINE_SETTINGS.gradientPreset = currentGradientPreset;
         }
     }
 
@@ -179,6 +183,30 @@ window.Ps3XmbRuntime = (function () {
         resize: resize,
         setVisualizerActive: value => {
             visualizerActive = Boolean(value);
+
+            if (!window.GraphicsProfile?.current?.lowPower || !canvas) {
+                return;
+            }
+
+            if (visualizerActive) {
+                suspendedForVisualizer = running;
+                stop();
+                canvas.classList.add("ps3-paused");
+
+                return;
+            }
+
+            canvas.classList.remove("ps3-paused");
+
+            if (
+                suspendedForVisualizer &&
+                document.body.classList.contains("theme-extreme-ps3")
+            ) {
+                suspendedForVisualizer = false;
+                start(currentGradientPreset);
+            } else {
+                suspendedForVisualizer = false;
+            }
         }
     };
 })();

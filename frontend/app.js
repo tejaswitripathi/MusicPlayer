@@ -69,6 +69,7 @@ let oscilloscopeWidth = 0;
 let oscilloscopeHeight = 0;
 let oscilloscopePixelRatio = 0;
 let oscilloscopeSmoothedWave = null;
+let visualizerSmoothedBins = null;
 
 if (navigator.userAgent.includes("Electron")) {
     document.body.classList.add("desktop");
@@ -1222,9 +1223,12 @@ function renderQueue() {
         return;
     }
 
+    const currentPosition = Math.max(0, currentQueuePosition());
+    const visibleQueue = queue.slice(currentPosition);
+
     replaceChildren(
         queueListElement,
-        queue.map((entry, index) => trackRow(entry.track, index + 1, {
+        visibleQueue.map((entry, index) => trackRow(entry.track, index + 1, {
             showArtist: true,
             entryId: entry.id,
             onPlay: () => {
@@ -1235,7 +1239,11 @@ function renderQueue() {
         }))
     );
 
-    highlightPlayingTrack();
+    if (queue.length) {
+        renderQueue();
+    } else {
+        highlightPlayingTrack();
+    }
 }
 
 
@@ -1860,14 +1868,18 @@ function currentQueuePosition() {
 function addToQueue(track) {
     const entry = queueEntry(track);
 
-    queue.push(entry);
-
     // Adding a song with nothing playing starts it, rather than quietly
     // filling a queue that never begins.
     if (currentEntryId === null) {
+        queue.push(entry);
         currentEntryId = entry.id;
 
         playTrack(entry.track);
+    } else {
+        const currentPosition = currentQueuePosition();
+        const insertAt = currentPosition === -1 ? queue.length : currentPosition + 1;
+
+        queue.splice(insertAt, 0, entry);
     }
 
     renderQueue();
@@ -2191,6 +2203,64 @@ function drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile) {
     ctx.stroke();
 }
 
+function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
+    const lowPower = window.GraphicsProfile?.current?.lowPower === true;
+    const binCount = lowPower ? 36 : 64;
+    const smoothing = lowPower ? 0.42 : 0.32;
+    const bottom = height * 0.72;
+    const maxBarHeight = height * 0.52;
+
+    if (!visualizerSmoothedBins || visualizerSmoothedBins.length !== binCount) {
+        visualizerSmoothedBins = new Float32Array(binCount);
+    }
+
+    ctx.clearRect(0, 0, width, height);
+
+    for (let i = 0; i < binCount; i++) {
+        const t0 = i / binCount;
+        const t1 = (i + 1) / binCount;
+        const start = Math.floor(Math.pow(t0, 1.7) * (dataArray.length - 1));
+        const end = Math.max(start + 1, Math.floor(Math.pow(t1, 1.7) * (dataArray.length - 1)));
+        let sum = 0;
+
+        for (let j = start; j < end; j++) {
+            sum += dataArray[j];
+        }
+
+        const value = sum / ((end - start) * 255);
+        const shaped = Math.pow(value, 1.35);
+
+        visualizerSmoothedBins[i] += (shaped - visualizerSmoothedBins[i]) * smoothing;
+    }
+
+    const gap = lowPower ? 5 : 7;
+    const step = width / binCount;
+
+    ctx.fillStyle = rgbCss(tone, 0.86);
+    ctx.strokeStyle = rgbCss(tone, 0.72);
+    ctx.lineCap = "round";
+
+    for (let i = 0; i < binCount; i++) {
+        const value = visualizerSmoothedBins[i];
+        const barHeight = Math.max(2, value * maxBarHeight);
+        const x = i * step + gap * 0.5;
+        const y = bottom - barHeight;
+        const barWidth = Math.max(2, step - gap);
+
+        if (kind === "fft-dots") {
+            const radius = Math.max(2.4, Math.min(7.5, barWidth * 0.35));
+
+            ctx.beginPath();
+            ctx.arc(x + barWidth * 0.5, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            continue;
+        }
+
+        ctx.fillRect(x, y, barWidth, barHeight);
+    }
+}
+
 function startOscilloscope() {
     setupAudioAnalyser();
 
@@ -2205,9 +2275,13 @@ function startOscilloscope() {
     const maxShockwaves = profile.maxShockwaves ?? 4;
     const fullGlow = profile.fullGlow !== false;
     const simpleCurve = profile.simpleCurve === true;
+    const visualizerType = typeof currentVisualizerType === "function"
+        ? currentVisualizerType()
+        : "oscilloscope";
     const bufferLength = analyser.fftSize;
 
     const dataArray = new Uint8Array(bufferLength);
+    const frequencyData = new Uint8Array(analyser.frequencyBinCount);
     let lastDrawMs = -Infinity;
 
     oscilloscopeEnergySlow = 0;
@@ -2282,11 +2356,18 @@ function startOscilloscope() {
             oscilloscopePixelRatio = pixelRatio;
         }
 
-        analyser.getByteTimeDomainData(dataArray);
-
         const tone = typeof currentOscilloscopeRgb === "function"
             ? currentOscilloscopeRgb()
             : { r: 255, g: 255, b: 255 };
+
+        if (visualizerType === "fft-bars" || visualizerType === "fft-dots") {
+            analyser.getByteFrequencyData(frequencyData);
+            drawFftHistogram(ctx, frequencyData, width, height, tone, visualizerType);
+
+            return;
+        }
+
+        analyser.getByteTimeDomainData(dataArray);
 
         if (simpleCurve) {
             drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile);
@@ -2508,6 +2589,7 @@ function stopOscilloscope() {
     oscilloscopeParticles = [];
     oscilloscopeShockwaves = [];
     oscilloscopeSmoothedWave = null;
+    visualizerSmoothedBins = null;
 }
 
 

@@ -155,11 +155,14 @@ const WIN7_OSCOPE = {
     sky: { r: 70, g: 180, b: 255 }
 };
 
+const VISUALIZER_TYPES = new Set(["oscilloscope", "fft-bars", "fft-dots"]);
+
 const defaultSettings = () => ({
     mode: "basic",
     basicTheme: "default-dark",
     extremeTheme: null,
     ps3Gradient: "08_day",
+    visualizerType: "oscilloscope",
     oscilloscopeColor: "#ffffff",
     win7Oscilloscope: "lime",
     profilePicture: null,
@@ -199,6 +202,10 @@ function normalizeSettings(loaded) {
         loaded.ps3Gradient = "08_day";
     }
 
+    if (!VISUALIZER_TYPES.has(loaded.visualizerType)) {
+        loaded.visualizerType = "oscilloscope";
+    }
+
     return loaded;
 }
 
@@ -207,6 +214,7 @@ const THEME_PREFERENCE_KEYS = [
     "basicTheme",
     "extremeTheme",
     "ps3Gradient",
+    "visualizerType",
     "oscilloscopeColor",
     "win7Oscilloscope",
     "hideExtremeWarning"
@@ -332,6 +340,12 @@ function currentOscilloscopeRgb() {
     return hexToRgb(settings.oscilloscopeColor || "#ffffff");
 }
 
+function currentVisualizerType() {
+    return VISUALIZER_TYPES.has(settings.visualizerType)
+        ? settings.visualizerType
+        : "oscilloscope";
+}
+
 function applyOscilloscopeCssVars() {
     const rgb = currentOscilloscopeRgb();
 
@@ -357,13 +371,26 @@ function ps3GradientById(id) {
 }
 
 function applyPs3GradientBackground() {
-    // Gradient is drawn by the WebGL XMB renderer; keep the DOM clear.
     clearBodyBackgroundImage();
+
+    const backdrop = document.getElementById("theme-backdrop");
+    const gradient = ps3GradientById(settings.ps3Gradient);
+
+    if (backdrop) {
+        backdrop.style.background =
+            `linear-gradient(${gradient.angle}deg, rgb(${gradient.start.join(",")}), rgb(${gradient.end.join(",")}))`;
+    }
 }
 
 function clearBodyBackgroundImage() {
     document.body.style.backgroundImage = "";
     document.body.style.backgroundAttachment = "";
+
+    const backdrop = document.getElementById("theme-backdrop");
+
+    if (backdrop) {
+        backdrop.style.background = "";
+    }
 }
 
 function ensureWin7Bubbles() {
@@ -451,6 +478,7 @@ function applyTheme() {
     updateThemeBackdropBlur();
     updateProfileAvatar();
     renderThemePickers();
+    renderVisualizersPage();
     renderOscilloscopeColorPage();
 }
 
@@ -752,6 +780,16 @@ function setWin7Oscilloscope(kind) {
     renderOscilloscopeColorPage();
 }
 
+function setVisualizerType(type) {
+    if (!VISUALIZER_TYPES.has(type)) {
+        return;
+    }
+
+    settings.visualizerType = type;
+    saveSettings();
+    renderVisualizersPage();
+}
+
 function buildThemePreviewCard(options) {
     const card = element("button", "theme-preview-card");
 
@@ -861,6 +899,15 @@ function renderOscilloscopeColorPage() {
     }
 }
 
+function renderVisualizersPage() {
+    document.querySelectorAll("[data-visualizer-type]").forEach(button => {
+        button.classList.toggle(
+            "selected",
+            button.dataset.visualizerType === currentVisualizerType()
+        );
+    });
+}
+
 function setProfilePicture(dataUrl) {
     settings.profilePicture = dataUrl;
     saveSettings();
@@ -900,6 +947,11 @@ function showPersonalization() {
 
 function showThemes() {
     showPage("themes-page");
+}
+
+function showVisualizers() {
+    showPage("visualizers-page");
+    renderVisualizersPage();
 }
 
 function showBasicThemes() {
@@ -955,8 +1007,20 @@ function wirePersonalizationUi() {
         openView(showThemes);
     });
 
+    document.getElementById("open-visualizers")?.addEventListener("click", () => {
+        openView(showVisualizers);
+    });
+
     document.getElementById("open-oscilloscope-color")?.addEventListener("click", () => {
         openView(showOscilloscopeColor);
+    });
+
+    document.getElementById("visualizer-options")?.addEventListener("click", event => {
+        const option = event.target.closest("[data-visualizer-type]");
+
+        if (option) {
+            setVisualizerType(option.dataset.visualizerType);
+        }
     });
 
     document.getElementById("open-basic-themes")?.addEventListener("click", () => {
