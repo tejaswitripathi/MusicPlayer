@@ -1011,15 +1011,15 @@ function wirePersonalizationUi() {
         openView(showVisualizers);
     });
 
-    document.getElementById("open-oscilloscope-color")?.addEventListener("click", () => {
-        openView(showOscilloscopeColor);
-    });
-
     document.getElementById("visualizer-options")?.addEventListener("click", event => {
         const option = event.target.closest("[data-visualizer-type]");
 
         if (option) {
             setVisualizerType(option.dataset.visualizerType);
+
+            if (option.dataset.visualizerType === "oscilloscope") {
+                openView(showOscilloscopeColor);
+            }
         }
     });
 

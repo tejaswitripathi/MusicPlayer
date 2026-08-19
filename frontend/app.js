@@ -1239,11 +1239,7 @@ function renderQueue() {
         }))
     );
 
-    if (queue.length) {
-        renderQueue();
-    } else {
-        highlightPlayingTrack();
-    }
+    highlightPlayingTrack();
 }
 
 
@@ -2205,10 +2201,13 @@ function drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile) {
 
 function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     const lowPower = window.GraphicsProfile?.current?.lowPower === true;
-    const binCount = lowPower ? 36 : 64;
-    const smoothing = lowPower ? 0.42 : 0.32;
-    const bottom = height * 0.72;
-    const maxBarHeight = height * 0.52;
+    const dots = kind === "fft-dots";
+    const binCount = dots
+        ? (lowPower ? 72 : 128)
+        : (lowPower ? 18 : 32);
+    const smoothing = lowPower ? 0.5 : 0.4;
+    const bottom = height * 0.76;
+    const maxBarHeight = height * 0.62;
 
     if (!visualizerSmoothedBins || visualizerSmoothedBins.length !== binCount) {
         visualizerSmoothedBins = new Float32Array(binCount);
@@ -2218,44 +2217,57 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
 
     for (let i = 0; i < binCount; i++) {
         const t0 = i / binCount;
-        const t1 = (i + 1) / binCount;
-        const start = Math.floor(Math.pow(t0, 1.7) * (dataArray.length - 1));
-        const end = Math.max(start + 1, Math.floor(Math.pow(t1, 1.7) * (dataArray.length - 1)));
+        const t1 = Math.min(1, (i + (dots ? 1 : 2)) / binCount);
+        const start = Math.floor(Math.pow(t0, 1.45) * (dataArray.length - 1));
+        const end = Math.max(start + 1, Math.floor(Math.pow(t1, 1.45) * (dataArray.length - 1)));
         let sum = 0;
+        let peak = 0;
 
         for (let j = start; j < end; j++) {
             sum += dataArray[j];
+
+            if (dataArray[j] > peak) {
+                peak = dataArray[j];
+            }
         }
 
-        const value = sum / ((end - start) * 255);
-        const shaped = Math.pow(value, 1.35);
+        const average = sum / ((end - start) * 255);
+        const value = Math.min(1, average * 0.72 + (peak / 255) * 0.7);
+        const shaped = Math.pow(value, 0.72);
 
         visualizerSmoothedBins[i] += (shaped - visualizerSmoothedBins[i]) * smoothing;
     }
 
-    const gap = lowPower ? 5 : 7;
+    const gap = dots ? (lowPower ? 2 : 3) : (lowPower ? 18 : 24);
     const step = width / binCount;
 
-    ctx.fillStyle = rgbCss(tone, 0.86);
-    ctx.strokeStyle = rgbCss(tone, 0.72);
+    ctx.fillStyle = rgbCss(tone, dots ? 0.58 : 0.68);
     ctx.lineCap = "round";
 
     for (let i = 0; i < binCount; i++) {
         const value = visualizerSmoothedBins[i];
-        const barHeight = Math.max(2, value * maxBarHeight);
+        const barHeight = Math.max(dots ? 4 : 3, value * maxBarHeight);
         const x = i * step + gap * 0.5;
-        const y = bottom - barHeight;
         const barWidth = Math.max(2, step - gap);
 
-        if (kind === "fft-dots") {
-            const radius = Math.max(2.4, Math.min(7.5, barWidth * 0.35));
+        if (dots) {
+            const radius = Math.max(1.15, Math.min(2.2, barWidth * 0.22));
+            const dotGap = radius * 2.65;
+            const dotCount = Math.max(1, Math.floor(barHeight / dotGap));
+            const centerX = x + barWidth * 0.5;
 
-            ctx.beginPath();
-            ctx.arc(x + barWidth * 0.5, y, radius, 0, Math.PI * 2);
-            ctx.fill();
+            for (let dot = 0; dot < dotCount; dot++) {
+                const y = bottom - dot * dotGap;
+
+                ctx.beginPath();
+                ctx.arc(centerX, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
 
             continue;
         }
+
+        const y = bottom - barHeight;
 
         ctx.fillRect(x, y, barWidth, barHeight);
     }

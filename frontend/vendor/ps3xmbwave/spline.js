@@ -297,11 +297,12 @@
         for (let xi = 0; xi < STEX_W; xi++) {
           const x = xi / Math.max(1, STEX_W - 1);
           const edge = Math.sin(Math.PI * x);
-          const primary = Math.sin(x * 7.2 + z * 1.35 - flow * 1.7) * 0.07;
-          const secondary = Math.sin(x * 15.0 - z * 2.2 + flow * 0.9) * 0.022;
-          const shimmer = Math.cos(x * 23.0 + z * 3.0 - flow * 0.55) * 0.01;
+          const primary = Math.sin(x * 7.2 + z * 1.35 - flow * 1.7) * 0.066;
+          const secondary = Math.sin(x * 13.0 - z * 2.1 + flow * 1.05) * 0.032;
+          const crossing = Math.cos(x * 10.5 + z * 4.4 + flow * 0.72) * 0.024;
+          const shimmer = Math.cos(x * 24.0 - z * 3.2 - flow * 0.48) * 0.012;
 
-          splineData[rowBase + xi] = (primary + secondary + shimmer) * rowEnvelope * edge;
+          splineData[rowBase + xi] = (primary + secondary + crossing + shimmer) * rowEnvelope * edge;
         }
       }
     }
