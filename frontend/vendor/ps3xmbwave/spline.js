@@ -404,13 +404,27 @@
       gl.uniform1f(waveU.ffdYAmp, settings.ffdYAmp);
       gl.uniform1f(waveU.ffdZAmp, settings.ffdZAmp);
       gl.uniform1f(waveU.zDetailScale, settings.zDetailScale);
-      gl.uniform1f(waveU.opacity, settings.opacity);
       gl.uniform1f(waveU.brightness, settings.brightness);
       gl.uniform1f(waveU.fresnelPower, settings.fresnelPower);
       gl.uniform1f(waveU.fresnelScale, settings.fresnelScale);
 
       gl.bindVertexArray(grid.vao);
-      gl.drawElements(gl.TRIANGLE_STRIP, grid.indexCount, gl.UNSIGNED_SHORT, 0);
+
+      const wavePasses = Math.max(1, profile.wavePasses || 1);
+      const passOpacity = settings.opacity / Math.sqrt(wavePasses);
+
+      for (let pass = 0; pass < wavePasses; pass++) {
+        const centered = pass - (wavePasses - 1) * 0.5;
+        const timeOffset = centered * 2.35;
+        const yOffset = settings.ffdOffsetY + centered * 0.1;
+        const zOffset = settings.ffdOffsetZ + centered * 0.055;
+
+        gl.uniform1f(waveU.time, timeSec + timeOffset);
+        gl.uniform3f(waveU.ffdOffset, settings.ffdOffsetX, yOffset, zOffset);
+        gl.uniform1f(waveU.opacity, passOpacity);
+        gl.drawElements(gl.TRIANGLE_STRIP, grid.indexCount, gl.UNSIGNED_SHORT, 0);
+      }
+
       gl.bindVertexArray(null);
     }
 

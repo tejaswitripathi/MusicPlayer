@@ -50,26 +50,27 @@ window.GraphicsProfile = (function () {
                 maxPixelRatio: 1,
                 antialias: true,
                 gridResolution: 100,
-                particleCount: null,
+                particleCount: 700,
                 drawParticles: true,
                 simpleDisplacement: false,
                 splineTextureWidth: 256,
                 splineTextureHeight: 64,
-                splineTextureHz: 60
+                splineTextureHz: 60,
+                wavePasses: 4
             },
             oscilloscope: {
-                fps: 24,
+                fps: 60,
                 maxPixelRatio: 1,
-                fftSize: 512,
+                fftSize: 2048,
                 minParticles: 0,
                 maxParticles: 0,
                 particleArea: 999999,
-                waveformPoints: 96,
-                smoothRadius: 2,
-                maxShockwaves: 0,
-                simpleCurve: true,
+                waveformPoints: 256,
+                smoothRadius: 3,
+                maxShockwaves: 4,
+                simpleCurve: false,
                 smoothing: 0.34,
-                fullGlow: false
+                fullGlow: true
             }
         }
     };

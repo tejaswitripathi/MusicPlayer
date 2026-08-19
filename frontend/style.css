@@ -74,9 +74,6 @@ main {
 
     z-index: 1;
 
-    transition:
-        opacity 0.28s ease,
-        filter 0.28s ease;
 }
 
 
@@ -101,9 +98,6 @@ main {
 
     z-index: 900;
 
-    transition:
-        opacity 0.28s ease,
-        filter 0.28s ease;
 }
 
 /* The desktop window hides its title bar, so the strip doubles as the drag
@@ -1193,17 +1187,16 @@ body.oscope-extreme #visualizer-panel {
 
 body.theme-extreme-windows7 #queue-panel,
 body.theme-extreme-ps3 #queue-panel {
-    background-color: color-mix(in srgb, var(--surface) 78%, transparent);
-    backdrop-filter: blur(18px);
+    background-color: var(--surface);
+    backdrop-filter: none;
 }
 
-/* Player panels are their own surfaces — blur the page underneath them. */
+/* Player panels are their own pages. */
 body.oscope-open main,
 body.oscope-open #top-bar,
 body.queue-open main,
 body.queue-open #top-bar {
-    opacity: 0;
-    filter: blur(18px);
+    visibility: hidden;
     pointer-events: none;
 }
 
@@ -1804,7 +1797,7 @@ body.queue-open #top-bar {
 
 .visualizer-preview::before,
 .visualizer-preview::after {
-    content: none;
+    content: "";
 
     position: absolute;
     inset: 0;
@@ -1838,46 +1831,6 @@ body.queue-open #top-bar {
     fill: rgb(var(--oscope-r), var(--oscope-g), var(--oscope-b));
     opacity: 0.68;
     filter: drop-shadow(0 0 4px rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.55));
-}
-
-.preview-oscilloscope::before {
-    background:
-        radial-gradient(ellipse at center, rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.2), transparent 58%),
-        linear-gradient(
-            104deg,
-            transparent 7%,
-            transparent 16%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 17%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 19%,
-            transparent 20%,
-            transparent 31%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 32%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 34%,
-            transparent 35%,
-            transparent 51%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 52%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 54%,
-            transparent 55%,
-            transparent 72%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 73%,
-            rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.86) 75%,
-            transparent 76%
-        );
-
-    filter: blur(0.4px);
-}
-
-.preview-dotted-oscilloscope::before {
-    background-image:
-        radial-gradient(circle, rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.7) 0 1.5px, transparent 1.8px),
-        radial-gradient(circle, rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.55) 0 1.5px, transparent 1.8px);
-    background-position:
-        4px 16px,
-        10px 26px;
-    background-size:
-        12px 9px,
-        12px 9px;
-    clip-path: polygon(0 45%, 15% 20%, 30% 54%, 44% 16%, 58% 62%, 73% 25%, 88% 48%, 100% 35%, 100% 100%, 0 100%);
 }
 
 .preview-fft-bars::before {

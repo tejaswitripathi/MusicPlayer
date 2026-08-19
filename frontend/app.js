@@ -2053,6 +2053,9 @@ function setupAudioAnalyser() {
     analyser = audioContext.createAnalyser();
 
     analyser.fftSize = window.GraphicsProfile?.current?.oscilloscope?.fftSize || 2048;
+    analyser.smoothingTimeConstant = 0.18;
+    analyser.minDecibels = -92;
+    analyser.maxDecibels = -18;
 
     audioSource.connect(analyser);
 
@@ -2312,8 +2315,8 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         }
 
         const average = sum / ((end - start) * 255);
-        const value = Math.min(1, average * 0.72 + (peak / 255) * 0.28);
-        const shaped = Math.pow(value, 1.85);
+        const value = Math.max(0, (average - 0.1) * 1.15 + Math.max(0, (peak / 255) - 0.32) * 0.16);
+        const shaped = Math.min(1, Math.pow(value, 1.6));
 
         const smoothing = shaped < visualizerSmoothedBins[i]
             ? fallSmoothing
