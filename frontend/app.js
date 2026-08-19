@@ -2291,6 +2291,7 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     const fallSmoothing = fftFallSmoothing(lowPower);
     const bottom = height * 0.76;
     const maxBarHeight = height * 0.62;
+    const frequencyCeiling = 0.88;
 
     if (!visualizerSmoothedBins || visualizerSmoothedBins.length !== binCount) {
         visualizerSmoothedBins = new Float32Array(binCount);
@@ -2301,8 +2302,8 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     for (let i = 0; i < binCount; i++) {
         const t0 = i / binCount;
         const t1 = Math.min(1, (i + (dots ? 1 : 2)) / binCount);
-        const start = Math.floor(Math.pow(t0, 1.45) * (dataArray.length - 1));
-        const end = Math.max(start + 1, Math.floor(Math.pow(t1, 1.45) * (dataArray.length - 1)));
+        const start = Math.floor(Math.pow(t0, 1.45) * frequencyCeiling * (dataArray.length - 1));
+        const end = Math.max(start + 1, Math.floor(Math.pow(t1, 1.45) * frequencyCeiling * (dataArray.length - 1)));
         let sum = 0;
         let peak = 0;
 
@@ -2664,15 +2665,14 @@ function startOscilloscope() {
             ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
             ctx.stroke();
         } else {
-            ctx.shadowColor = rgbCss(tone, 0.8);
-            ctx.shadowBlur = 8 + pulse * 6;
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
             ctx.lineWidth = 4 + pulse * 2;
-            ctx.strokeStyle = rgbCss(tone, 0.86);
+            ctx.strokeStyle = rgbCss(tone, 0.88);
             ctx.stroke();
 
-            ctx.shadowBlur = 0;
             ctx.lineWidth = 1.1;
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.78)";
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
             ctx.stroke();
         }
 

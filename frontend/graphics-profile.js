@@ -56,7 +56,7 @@ window.GraphicsProfile = (function () {
                 splineTextureWidth: 256,
                 splineTextureHeight: 64,
                 splineTextureHz: 60,
-                wavePasses: 4
+                wavePasses: 1
             },
             oscilloscope: {
                 fps: 60,
@@ -67,10 +67,10 @@ window.GraphicsProfile = (function () {
                 particleArea: 999999,
                 waveformPoints: 256,
                 smoothRadius: 3,
-                maxShockwaves: 4,
+                maxShockwaves: 0,
                 simpleCurve: false,
                 smoothing: 0.34,
-                fullGlow: true
+                fullGlow: false
             }
         }
     };
