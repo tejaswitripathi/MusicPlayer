@@ -2199,13 +2199,80 @@ function drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile) {
     ctx.stroke();
 }
 
+function oscilloscopeColumnValues(dataArray, pointCount, smoothRadius, smoothing) {
+    const bufferLength = dataArray.length;
+
+    if (!oscilloscopeSmoothedWave || oscilloscopeSmoothedWave.length !== pointCount) {
+        oscilloscopeSmoothedWave = new Float32Array(pointCount);
+    }
+
+    for (let p = 0; p < pointCount; p++) {
+        const index = Math.round(p * (bufferLength - 1) / (pointCount - 1));
+        let sum = 0;
+        let count = 0;
+
+        for (let k = -smoothRadius; k <= smoothRadius; k++) {
+            const sampleIndex = index + k;
+
+            if (sampleIndex >= 0 && sampleIndex < bufferLength) {
+                sum += (dataArray[sampleIndex] - 128) / 128;
+                count += 1;
+            }
+        }
+
+        const target = count ? sum / count : 0;
+
+        oscilloscopeSmoothedWave[p] += (target - oscilloscopeSmoothedWave[p]) * smoothing;
+    }
+
+    return oscilloscopeSmoothedWave;
+}
+
+function drawDottedOscilloscope(ctx, dataArray, width, height, tone, profile) {
+    const lowPower = window.GraphicsProfile?.current?.lowPower === true;
+    const pointCount = lowPower ? 72 : 128;
+    const smoothRadius = profile.smoothRadius ?? 2;
+    const values = oscilloscopeColumnValues(
+        dataArray,
+        pointCount,
+        smoothRadius,
+        lowPower ? 0.42 : 0.34
+    );
+    const centerY = height / 2;
+    const heightScale = centerY * 0.72;
+    const step = width / pointCount;
+    const radius = lowPower ? 1.55 : 1.85;
+    const dotGap = radius * 2.75;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = rgbCss(tone, 0.56);
+
+    for (let p = 0; p < pointCount; p++) {
+        const position = p / (pointCount - 1);
+        const envelope = Math.sin(Math.PI * position);
+        const amplitude = values[p] * heightScale * envelope;
+        const x = p * step + step * 0.5;
+        const dotCount = Math.max(1, Math.floor(Math.abs(amplitude) / dotGap));
+        const direction = amplitude >= 0 ? 1 : -1;
+
+        for (let dot = 0; dot <= dotCount; dot++) {
+            const y = centerY + direction * dot * dotGap;
+
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
 function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     const lowPower = window.GraphicsProfile?.current?.lowPower === true;
     const dots = kind === "fft-dots";
     const binCount = dots
         ? (lowPower ? 72 : 128)
         : (lowPower ? 18 : 32);
-    const smoothing = lowPower ? 0.5 : 0.4;
+    const riseSmoothing = lowPower ? 0.5 : 0.4;
+    const fallSmoothing = lowPower ? 0.88 : 0.78;
     const bottom = height * 0.76;
     const maxBarHeight = height * 0.62;
 
@@ -2235,6 +2302,10 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         const value = Math.min(1, average * 0.72 + (peak / 255) * 0.7);
         const shaped = Math.pow(value, 0.72);
 
+        const smoothing = shaped < visualizerSmoothedBins[i]
+            ? fallSmoothing
+            : riseSmoothing;
+
         visualizerSmoothedBins[i] += (shaped - visualizerSmoothedBins[i]) * smoothing;
     }
 
@@ -2248,7 +2319,9 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         const value = visualizerSmoothedBins[i];
         const barHeight = Math.max(dots ? 4 : 3, value * maxBarHeight);
         const x = i * step + gap * 0.5;
-        const barWidth = Math.max(2, step - gap);
+        const barWidth = dots
+            ? Math.max(2, step - gap)
+            : Math.max(2, width / (lowPower ? 36 : 64) - (lowPower ? 5 : 7));
 
         if (dots) {
             const radius = Math.max(1.15, Math.min(2.2, barWidth * 0.22));
@@ -2268,8 +2341,9 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         }
 
         const y = bottom - barHeight;
+        const centeredX = x + (step - gap - barWidth) * 0.5;
 
-        ctx.fillRect(x, y, barWidth, barHeight);
+        ctx.fillRect(centeredX, y, barWidth, barHeight);
     }
 }
 
@@ -2380,6 +2454,12 @@ function startOscilloscope() {
         }
 
         analyser.getByteTimeDomainData(dataArray);
+
+        if (visualizerType === "dotted-oscilloscope") {
+            drawDottedOscilloscope(ctx, dataArray, width, height, tone, profile);
+
+            return;
+        }
 
         if (simpleCurve) {
             drawSimpleOscilloscope(ctx, dataArray, width, height, tone, profile);

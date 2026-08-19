@@ -155,7 +155,7 @@ const WIN7_OSCOPE = {
     sky: { r: 70, g: 180, b: 255 }
 };
 
-const VISUALIZER_TYPES = new Set(["oscilloscope", "fft-bars", "fft-dots"]);
+const VISUALIZER_TYPES = new Set(["oscilloscope", "dotted-oscilloscope", "fft-bars", "fft-dots"]);
 
 const defaultSettings = () => ({
     mode: "basic",
@@ -448,6 +448,7 @@ function updateThemeBackdropBlur() {
     );
 
     document.body.classList.toggle("oscope-open", visualizerOpen);
+    document.body.classList.toggle("queue-open", queueOpen);
     document.body.classList.toggle(
         "oscope-extreme",
         visualizerOpen && extreme

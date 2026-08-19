@@ -353,7 +353,6 @@ body.graphics-low-power #win7-oscope-toggle .chip {
     backdrop-filter: none !important;
 }
 
-body.graphics-low-power .player-panel,
 body.graphics-low-power .tab,
 body.graphics-low-power .filter {
     transition: none;
@@ -1193,9 +1192,11 @@ body.theme-extreme-ps3 #queue-panel {
     backdrop-filter: blur(18px);
 }
 
-/* Oscilloscope is its own page — hide everything underneath it. */
+/* Player panels are their own surfaces — hide the page underneath them. */
 body.oscope-open main,
-body.oscope-open #top-bar {
+body.oscope-open #top-bar,
+body.queue-open main,
+body.queue-open #top-bar {
     visibility: hidden;
     pointer-events: none;
 }

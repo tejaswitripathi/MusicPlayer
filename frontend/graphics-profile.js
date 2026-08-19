@@ -44,18 +44,18 @@ window.GraphicsProfile = (function () {
             maxRenderWidth: 1280,
             maxRenderHeight: 720,
             ps3: {
-                fps: 24,
+                fps: 30,
                 visualizerFps: 4,
-                renderScale: 0.72,
+                renderScale: 1,
                 maxPixelRatio: 1,
                 antialias: false,
-                gridResolution: 68,
-                particleCount: 420,
+                gridResolution: 100,
+                particleCount: 1100,
                 drawParticles: true,
-                simpleDisplacement: true,
+                simpleDisplacement: false,
                 splineTextureWidth: 128,
                 splineTextureHeight: 32,
-                splineTextureHz: 12
+                splineTextureHz: 15
             },
             oscilloscope: {
                 fps: 24,
