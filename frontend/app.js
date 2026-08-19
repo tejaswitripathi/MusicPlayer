@@ -1128,18 +1128,13 @@ function renderArtistResults() {
    one of them can hold that space, so opening one waits for the other to
    finish collapsing. */
 
-const PANEL_ANIMATION_MS = 280;
-
 const queuePanel = document.getElementById("queue-panel");
 const visualizerPanel = document.getElementById("visualizer-panel");
 const queueToggle = document.getElementById("queue-toggle");
 
 let openPanel = null;
-let panelTimer = null;
 
 function togglePanel(name) {
-    clearTimeout(panelTimer);
-
     if (openPanel === name) {
         closePanel();
 
@@ -1148,8 +1143,7 @@ function togglePanel(name) {
 
     if (openPanel) {
         closePanel();
-
-        panelTimer = setTimeout(() => showPanel(name), PANEL_ANIMATION_MS);
+        showPanel(name);
 
         return;
     }
@@ -2277,11 +2271,11 @@ function drawDottedOscilloscope(ctx, dataArray, width, height, tone, profile) {
 }
 
 function fftFallSmoothing(lowPower) {
-    return lowPower ? 0.985 : 0.94;
+    return 1;
 }
 
 function fftRiseSmoothing(lowPower) {
-    return lowPower ? 0.55 : 0.46;
+    return lowPower ? 0.62 : 0.52;
 }
 
 function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
@@ -2318,8 +2312,8 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         }
 
         const average = sum / ((end - start) * 255);
-        const value = Math.min(1, average * 0.72 + (peak / 255) * 0.7);
-        const shaped = Math.pow(value, 0.72);
+        const value = Math.min(1, average * 0.72 + (peak / 255) * 0.28);
+        const shaped = Math.pow(value, 1.85);
 
         const smoothing = shaped < visualizerSmoothedBins[i]
             ? fallSmoothing

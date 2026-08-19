@@ -94,10 +94,10 @@ main {
 
     padding: 0 32px;
 
-    background-color: color-mix(in srgb, var(--background) 92%, transparent);
-    backdrop-filter: blur(12px);
+    background-color: #000;
+    backdrop-filter: none;
 
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #111;
 
     z-index: 900;
 
@@ -925,8 +925,8 @@ body.theme-extreme-ps3 .tile:hover .art {
 
     height: var(--player-height);
 
-    background-color: var(--surface);
-    border-top: 1px solid var(--border);
+    background-color: #000;
+    border-top: 1px solid #111;
 
     overflow: visible;
 
@@ -1165,9 +1165,7 @@ body.theme-extreme-ps3 .tile:hover .art {
 
     background-color: var(--surface);
 
-    transition:
-        height 0.28s ease,
-        box-shadow 0.28s ease;
+    transition: none;
 }
 
 .player-panel.open {
@@ -1806,10 +1804,40 @@ body.queue-open #top-bar {
 
 .visualizer-preview::before,
 .visualizer-preview::after {
-    content: "";
+    content: none;
 
     position: absolute;
     inset: 0;
+}
+
+.visualizer-preview svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.preview-line,
+.preview-glow {
+    fill: none;
+    stroke: rgb(var(--oscope-r), var(--oscope-g), var(--oscope-b));
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.preview-line {
+    stroke-width: 2.2;
+    opacity: 0.9;
+}
+
+.preview-glow {
+    stroke-width: 7;
+    opacity: 0.2;
+}
+
+.preview-dot-wave {
+    fill: rgb(var(--oscope-r), var(--oscope-g), var(--oscope-b));
+    opacity: 0.68;
+    filter: drop-shadow(0 0 4px rgba(var(--oscope-r), var(--oscope-g), var(--oscope-b), 0.55));
 }
 
 .preview-oscilloscope::before {
@@ -2244,14 +2272,14 @@ body.theme-extreme-windows7 {
 }
 
 body.theme-extreme-windows7 #top-bar {
-    background-color: rgba(20, 40, 70, 0.45);
-    border-bottom-color: rgba(255, 255, 255, 0.22);
+    background-color: #000;
+    border-bottom-color: #111;
 }
 
 body.theme-extreme-windows7 #player-bar {
-    background-color: rgba(20, 40, 70, 0.55);
-    border-top-color: rgba(255, 255, 255, 0.22);
-    backdrop-filter: blur(14px);
+    background-color: #000;
+    border-top-color: #111;
+    backdrop-filter: none;
 }
 
 body.theme-extreme-windows7 .tab.active,
@@ -2275,14 +2303,14 @@ body.theme-extreme-ps3 {
 }
 
 body.theme-extreme-ps3 #top-bar {
-    background-color: rgba(8, 10, 20, 0.35);
-    border-bottom-color: rgba(255, 255, 255, 0.12);
+    background-color: #000;
+    border-bottom-color: #111;
 }
 
 body.theme-extreme-ps3 #player-bar {
-    background-color: rgba(8, 10, 20, 0.45);
-    border-top-color: rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(14px);
+    background-color: #000;
+    border-top-color: #111;
+    backdrop-filter: none;
 }
 
 

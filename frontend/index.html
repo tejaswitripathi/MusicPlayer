@@ -382,12 +382,27 @@
             <div class="settings-list" id="visualizer-options">
                 <button type="button" class="settings-row" data-visualizer-type="oscilloscope">
                     <span class="settings-row-label">Oscilloscope</span>
-                    <span class="visualizer-preview preview-oscilloscope" aria-hidden="true"></span>
+                    <span class="visualizer-preview" aria-hidden="true">
+                        <svg viewBox="0 0 118 48" focusable="false">
+                            <path class="preview-glow" d="M4 24 C16 24, 18 12, 29 12 S43 36, 55 36 S69 12, 82 12 S97 24, 114 24"/>
+                            <path class="preview-line" d="M4 24 C16 24, 18 12, 29 12 S43 36, 55 36 S69 12, 82 12 S97 24, 114 24"/>
+                        </svg>
+                    </span>
                     <span class="settings-row-check">✓</span>
                 </button>
                 <button type="button" class="settings-row" data-visualizer-type="dotted-oscilloscope">
                     <span class="settings-row-label">Dotted oscilloscope</span>
-                    <span class="visualizer-preview preview-dotted-oscilloscope" aria-hidden="true"></span>
+                    <span class="visualizer-preview" aria-hidden="true">
+                        <svg viewBox="0 0 118 48" focusable="false">
+                            <g class="preview-dot-wave">
+                                <circle cx="8" cy="24" r="1.7"/><circle cx="16" cy="20" r="1.7"/><circle cx="24" cy="13" r="1.7"/>
+                                <circle cx="32" cy="18" r="1.7"/><circle cx="40" cy="30" r="1.7"/><circle cx="48" cy="36" r="1.7"/>
+                                <circle cx="56" cy="28" r="1.7"/><circle cx="64" cy="16" r="1.7"/><circle cx="72" cy="11" r="1.7"/>
+                                <circle cx="80" cy="19" r="1.7"/><circle cx="88" cy="29" r="1.7"/><circle cx="96" cy="34" r="1.7"/>
+                                <circle cx="104" cy="27" r="1.7"/><circle cx="112" cy="24" r="1.7"/>
+                            </g>
+                        </svg>
+                    </span>
                     <span class="settings-row-check">✓</span>
                 </button>
                 <button type="button" class="settings-row" data-visualizer-type="fft-bars">
