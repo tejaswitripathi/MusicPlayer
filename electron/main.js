@@ -171,6 +171,12 @@ function writeOfflineCollection(kind, collection) {
     );
 }
 
+function readOfflineCollection(kind, id) {
+    return JSON.parse(
+        fs.readFileSync(collectionFile(kind, id), "utf8")
+    );
+}
+
 async function downloadTrack(track, cookie) {
     ensureDir(path.join(OFFLINE_DIR, "tracks"));
 
@@ -242,6 +248,39 @@ async function handleOfflineDownload(req, res) {
 
         writeOfflineCollection(kind, collection);
         localJson(res, 200, { saved: true, id, kind, tracks: tracks.length });
+    } catch (error) {
+        localJson(res, 500, { detail: error.message });
+    }
+}
+
+async function handleOfflinePlaylistItem(req, res, playlistId) {
+    try {
+        const body = await collectBody(req);
+        const track = body.track || {};
+
+        if (!track.id) {
+            localJson(res, 400, { detail: "Missing track." });
+            return;
+        }
+
+        const collection = readOfflineCollection("playlists", playlistId);
+
+        await downloadTrack(track, req.headers.cookie || "");
+
+        const tracks = Array.isArray(collection.tracks) ? collection.tracks : [];
+
+        collection.tracks = tracks.some(item => item.id === track.id)
+            ? tracks
+            : tracks.concat(track);
+        collection.downloadedAt = new Date().toISOString();
+
+        writeOfflineCollection("playlists", collection);
+
+        localJson(res, 200, {
+            saved: true,
+            id: playlistId,
+            tracks: collection.tracks.length
+        });
     } catch (error) {
         localJson(res, 500, { detail: error.message });
     }
@@ -445,6 +484,7 @@ async function handleReleaseDownload(req, res) {
 
 function handleLocal(req, res) {
     const pathname = new URL(req.url, "http://localhost").pathname;
+    const playlistItemMatch = pathname.match(/^\/local\/offline\/playlists\/([^/]+)\/items$/);
 
     if (req.method === "GET" && pathname === "/local/offline") {
         localJson(res, 200, readOfflineCollections());
@@ -453,6 +493,11 @@ function handleLocal(req, res) {
 
     if (req.method === "POST" && pathname === "/local/offline/download") {
         handleOfflineDownload(req, res);
+        return true;
+    }
+
+    if (req.method === "POST" && playlistItemMatch) {
+        handleOfflinePlaylistItem(req, res, decodeURIComponent(playlistItemMatch[1]));
         return true;
     }
 

@@ -135,10 +135,10 @@ const PS3_GRADIENTS = [
     },
     {
         id: "01_night",
-        label: "Dark gray → black",
-        start: [181, 181, 181],
-        end: [0, 0, 0],
-        angle: 89.75
+        label: "Dark blue → black",
+        start: [36, 63, 94],
+        end: [0, 6, 12],
+        angle: 180
     }
 ];
 
@@ -178,6 +178,7 @@ const defaultSettings = () => ({
     ps3Gradient: "08_day",
     visualizerType: "oscilloscope",
     oscilloscopeColor: "#ffffff",
+    oscilloscopeOutlineColor: "",
     win7Oscilloscope: "lime",
     profilePicture: null,
     hideExtremeWarning: false
@@ -230,6 +231,7 @@ const THEME_PREFERENCE_KEYS = [
     "ps3Gradient",
     "visualizerType",
     "oscilloscopeColor",
+    "oscilloscopeOutlineColor",
     "win7Oscilloscope",
     "hideExtremeWarning"
 ];
@@ -352,6 +354,12 @@ function currentOscilloscopeRgb() {
     }
 
     return hexToRgb(settings.oscilloscopeColor || "#ffffff");
+}
+
+function currentOscilloscopeOutlineRgb() {
+    return settings.oscilloscopeOutlineColor
+        ? hexToRgb(settings.oscilloscopeOutlineColor)
+        : null;
 }
 
 function currentVisualizerType() {
@@ -789,6 +797,12 @@ function setOscilloscopeColor(hex) {
     applyTheme();
 }
 
+function setOscilloscopeOutlineColor(hex) {
+    settings.oscilloscopeOutlineColor = hex || "";
+    saveSettings();
+    renderOscilloscopeColorPage();
+}
+
 function setWin7Oscilloscope(kind) {
     if (!WIN7_OSCOPE[kind]) {
         return;
@@ -888,6 +902,9 @@ function renderThemePickers() {
 function renderOscilloscopeColorPage() {
     const input = document.getElementById("oscilloscope-color-input");
     const picker = document.getElementById("oscilloscope-color-picker");
+    const outlineToggle = document.getElementById("oscilloscope-outline-enabled");
+    const outlineInput = document.getElementById("oscilloscope-outline-color-input");
+    const outlinePicker = document.getElementById("oscilloscope-outline-picker");
     const win7Options = document.getElementById("win7-oscilloscope-options");
     const win7Toggle = document.getElementById("win7-oscope-toggle");
     const onWin7 =
@@ -899,6 +916,19 @@ function renderOscilloscopeColorPage() {
 
     if (picker) {
         picker.classList.toggle("hidden", onWin7);
+    }
+
+    if (outlineToggle) {
+        outlineToggle.checked = Boolean(settings.oscilloscopeOutlineColor);
+    }
+
+    if (outlineInput) {
+        outlineInput.value = settings.oscilloscopeOutlineColor || "#ffffff";
+        outlineInput.disabled = !settings.oscilloscopeOutlineColor;
+    }
+
+    if (outlinePicker) {
+        outlinePicker.classList.toggle("hidden", onWin7);
     }
 
     if (win7Options) {
@@ -1079,6 +1109,18 @@ function wirePersonalizationUi() {
 
     document.getElementById("oscilloscope-color-input")?.addEventListener("input", event => {
         setOscilloscopeColor(event.target.value);
+    });
+
+    document.getElementById("oscilloscope-outline-enabled")?.addEventListener("change", event => {
+        const input = document.getElementById("oscilloscope-outline-color-input");
+
+        setOscilloscopeOutlineColor(event.target.checked
+            ? (input?.value || "#ffffff")
+            : "");
+    });
+
+    document.getElementById("oscilloscope-outline-color-input")?.addEventListener("input", event => {
+        setOscilloscopeOutlineColor(event.target.value);
     });
 
     document.getElementById("win7-oscilloscope-options")?.addEventListener("click", event => {

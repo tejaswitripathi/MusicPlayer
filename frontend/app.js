@@ -544,7 +544,7 @@ function newPlaylistTile() {
 }
 
 function openPlaylistFileTile() {
-    const node = tile(null, "Open file");
+    const node = tile(null, "Load from metadata");
 
     node.classList.add("open-playlist-file");
 
@@ -1396,7 +1396,7 @@ function renderPlaylistChoices(track, all, holding) {
             const wanted = box.checked;
 
             const change = wanted
-                ? addSongToPlaylist(playlist.id, track.id)
+                ? addSongToPlaylist(playlist.id, track)
                 : removeSongFromPlaylist(playlist.id, track.id);
 
             change
@@ -1492,7 +1492,7 @@ function newPlaylistChoice(track) {
                 body: JSON.stringify({ name: name })
             })
                 .then(readJson)
-                .then(playlist => addSongToPlaylist(playlist.id, track.id))
+                .then(playlist => addSongToPlaylist(playlist.id, track))
                 .then(() => {
                     loadPlaylists();
 
@@ -1511,12 +1511,33 @@ function newPlaylistChoice(track) {
     return row;
 }
 
-function addSongToPlaylist(playlistId, trackId) {
+function addSongToPlaylist(playlistId, trackOrId) {
+    const trackId = typeof trackOrId === "string" ? trackOrId : trackOrId.id;
+
     return fetch(`/api/playlists/${playlistId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ track_ids: [trackId] })
-    }).then(readJson);
+    })
+        .then(readJson)
+        .then(result => cachePlaylistTrackOffline(playlistId, trackOrId).then(() => result));
+}
+
+function cachePlaylistTrackOffline(playlistId, trackOrId) {
+    if (
+        typeof trackOrId === "string" ||
+        !isDownloaded("playlists", playlistId)
+    ) {
+        return Promise.resolve();
+    }
+
+    return fetch(`/local/offline/playlists/${encodeURIComponent(playlistId)}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track: trackOrId })
+    })
+        .then(readJson)
+        .catch(() => {});
 }
 
 function removeSongFromPlaylist(playlistId, trackId) {
@@ -1647,7 +1668,7 @@ function renderAddSongsResults(songs) {
 
             button.disabled = true;
 
-            addSongToPlaylist(addSongsPlaylist.id, song.id)
+            addSongToPlaylist(addSongsPlaylist.id, song)
                 .then(() => {
                     addSongsHeld.add(song.id);
 
@@ -2776,6 +2797,9 @@ function startOscilloscope() {
         const tone = typeof currentOscilloscopeRgb === "function"
             ? currentOscilloscopeRgb()
             : { r: 255, g: 255, b: 255 };
+        const outlineTone = typeof currentOscilloscopeOutlineRgb === "function"
+            ? currentOscilloscopeOutlineRgb()
+            : null;
 
         if (visualizerType.startsWith("fft-")) {
             analyser.getByteFrequencyData(frequencyData);
@@ -2962,6 +2986,14 @@ function startOscilloscope() {
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
 
+        if (outlineTone) {
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
+            ctx.lineWidth = fullGlow ? 13 + pulse * 6 : 7 + pulse * 3;
+            ctx.strokeStyle = rgbCss(outlineTone, 0.92);
+            ctx.stroke();
+        }
+
         if (fullGlow) {
             ctx.shadowColor = rgbCss(tone, 0.95);
             ctx.shadowBlur = 22 + pulse * 14;
@@ -3066,10 +3098,17 @@ function showCreateAccount() {
     document.getElementById("create-username")?.focus();
 }
 
+function showForgotPassword() {
+    showPage("forgot-password-page");
+    hideAuthError("forgot-password-message");
+    document.getElementById("reset-username")?.focus();
+}
+
 function hideAuthError(id) {
     const error = document.getElementById(id);
 
     error.classList.add("hidden");
+    error.classList.remove("success");
     error.textContent = "";
 }
 
@@ -3077,6 +3116,15 @@ function showAuthError(id, message) {
     const error = document.getElementById(id);
 
     error.textContent = message;
+    error.classList.remove("success");
+    error.classList.remove("hidden");
+}
+
+function showAuthSuccess(id, message) {
+    const error = document.getElementById(id);
+
+    error.textContent = message;
+    error.classList.add("success");
     error.classList.remove("hidden");
 }
 
@@ -3201,6 +3249,43 @@ function submitCreateAccount() {
         });
 }
 
+function submitForgotPassword() {
+    const username = document.getElementById("reset-username").value.trim();
+    const password = document.getElementById("reset-password").value;
+    const confirm = document.getElementById("reset-password-confirm").value;
+    const button = document.getElementById("forgot-password-submit");
+
+    hideAuthError("forgot-password-message");
+
+    if (password !== confirm) {
+        showAuthError("forgot-password-message", "Those passwords do not match.");
+        return;
+    }
+
+    button.disabled = true;
+
+    fetch("/api/password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+        .then(readJson)
+        .then(result => {
+            document.getElementById("reset-password").value = "";
+            document.getElementById("reset-password-confirm").value = "";
+            showAuthSuccess(
+                "forgot-password-message",
+                result.message || "If that account exists, its password has been reset."
+            );
+        })
+        .catch(err => {
+            showAuthError("forgot-password-message", err.message);
+        })
+        .finally(() => {
+            button.disabled = false;
+        });
+}
+
 function logout() {
     clearTimeout(preferencesTimer);
 
@@ -3260,6 +3345,11 @@ function wireLoginForm() {
         submitCreateAccount();
     });
 
+    document.getElementById("forgot-password-form")?.addEventListener("submit", event => {
+        event.preventDefault();
+        submitForgotPassword();
+    });
+
     const createUsername = document.getElementById("create-username");
 
     createUsername?.addEventListener("input", () => {
@@ -3273,6 +3363,10 @@ function wireLoginForm() {
 
     document.getElementById("open-create-account")?.addEventListener("click", () => {
         openView(showCreateAccount);
+    });
+
+    document.getElementById("open-forgot-password")?.addEventListener("click", () => {
+        openView(showForgotPassword);
     });
 
     document.getElementById("open-login")?.addEventListener("click", () => {

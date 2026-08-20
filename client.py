@@ -21,6 +21,7 @@ PROBE_TIMEOUT = (2, 4)
 APP_NAME = "MusicPlayer"
 APP_VERSION = "0.0.1"
 DEVICE_NAME = "MusicPlayer"
+PLAYLIST_OWNERS_DIR = Path(__file__).resolve().parent / "data" / "playlist_owners"
 
 
 class ServerUnreachable(Exception):
@@ -57,6 +58,10 @@ class RegistrationFailed(Exception):
 
 class PlaylistNotFound(Exception):
     """This user does not own that playlist, or it does not exist."""
+
+
+class PasswordResetUnavailable(Exception):
+    """Password reset needs configured admin credentials."""
 
 
 def read_candidates():
@@ -560,12 +565,14 @@ class AppClient:
             if is_sidecar_playlist(playlist):
                 continue
 
-            if not owned_by(playlist, self.user_id):
-                continue
-
             playlist_id = playlist.get("Id")
 
-            self._privatize_playlist(playlist_id)
+            if playlist_id is None:
+                continue
+
+            if not owned_by(playlist, self.user_id):
+                if playlist.get("OwnerUserId") or not self._known_playlist(playlist_id):
+                    continue
 
             summaries.append({
                 "id": playlist_id,
@@ -667,6 +674,7 @@ class AppClient:
         playlist_id = response.get("Id")
 
         self._privatize_playlist(playlist_id)
+        self._remember_playlist(playlist_id)
 
         return {"id": playlist_id, "name": name}
 
@@ -681,7 +689,14 @@ class AppClient:
         except JellyfinError as error:
             raise PlaylistNotFound() from error
 
-        if not item or is_sidecar_playlist(item) or not owned_by(item, self.user_id):
+        if not item or is_sidecar_playlist(item):
+            raise PlaylistNotFound()
+
+        if not owned_by(item, self.user_id):
+            if item.get("OwnerUserId") or not self._known_playlist(playlist_id):
+                raise PlaylistNotFound()
+
+        if not item.get("OwnerUserId") and not self._known_playlist(playlist_id):
             raise PlaylistNotFound()
 
         return item
@@ -701,6 +716,74 @@ class AppClient:
             return
 
         self._privatized_playlists.add(playlist_id)
+
+    def _owner_file(self):
+        return PLAYLIST_OWNERS_DIR / f"{safe_file_id(self.user_id)}.json"
+
+    def _known_playlists(self):
+        try:
+            data = json.loads(self._owner_file().read_text())
+        except (OSError, ValueError):
+            return set()
+
+        if not isinstance(data, list):
+            return set()
+
+        return {str(item) for item in data}
+
+    def _known_playlist(self, playlist_id):
+        return str(playlist_id) in self._known_playlists()
+
+    def _remember_playlist(self, playlist_id):
+        if not self.user_id or not playlist_id:
+            return
+
+        known = self._known_playlists()
+        known.add(str(playlist_id))
+
+        PLAYLIST_OWNERS_DIR.mkdir(parents=True, exist_ok=True)
+        self._owner_file().write_text(json.dumps(sorted(known), indent=2))
+
+    def reset_password(self, username, new_password):
+        admin = self._admin_identity()
+        users = self._list_users()
+        wanted = username.strip().lower()
+        user = next(
+            (item for item in users if (item.get("Name") or "").lower() == wanted),
+            None
+        )
+
+        if not user:
+            return False
+
+        user_id = user.get("Id")
+
+        if not user_id:
+            return False
+
+        def send():
+            return requests.post(
+                f"{self.server_url}/Users/{user_id}/Password",
+                json={
+                    "CurrentPw": "",
+                    "NewPw": new_password,
+                    "ResetPassword": True
+                },
+                headers=self._admin_headers(admin["access_token"]),
+                timeout=JELLYFIN_TIMEOUT
+            )
+
+        response = self.request(send)
+
+        if response.status_code in (401, 403):
+            raise PasswordResetUnavailable()
+
+        if response.status_code not in (200, 204):
+            raise requests.exceptions.RequestException(
+                f"Could not reset password ({response.status_code})"
+            )
+
+        return True
 
 
 # Playlist files that album downloads often ship alongside the audio.
@@ -726,6 +809,10 @@ def same_id(left, right):
     return str(left).replace("-", "").casefold() == str(right).replace("-", "").casefold()
 
 
+def safe_file_id(value):
+    return re.sub(r"[^a-z0-9._-]+", "-", str(value or "unknown"), flags=re.I)
+
+
 def owned_by(item, user_id):
     """Whether a Jellyfin item belongs to this user.
 
@@ -733,9 +820,7 @@ def owned_by(item, user_id):
     playlists from other accounts still appear in Users/Items, so ownership
     is what keeps each person's list private.
     """
-    owner = item.get("OwnerUserId")
-
-    return not owner or same_id(owner, user_id)
+    return same_id(item.get("OwnerUserId"), user_id)
 
 
 TRACK_FIELDS = "ParentIndexNumber,RunTimeTicks,Path"

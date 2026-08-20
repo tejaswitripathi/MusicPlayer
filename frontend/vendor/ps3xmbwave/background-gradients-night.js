@@ -2,9 +2,9 @@
 
 window.BG_GRADIENT_PRESETS_NIGHT = {
   '01': {
-    angleDeg: 89.75,
-    colorStart: [181, 181, 181, 255],
-    colorEnd: [0, 0, 0, 255],
+    angleDeg: 180,
+    colorStart: [36, 63, 94, 255],
+    colorEnd: [0, 6, 12, 255],
   },
   '02': {
     angleDeg: 93.75,

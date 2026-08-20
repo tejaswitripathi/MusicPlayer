@@ -7,6 +7,7 @@ from jellyfin_apiclient_python.exceptions import HTTPException as JellyfinError
 from client import (
     AppClient,
     InvalidCredentials,
+    PasswordResetUnavailable,
     PlaylistNotFound,
     RegistrationFailed,
     RegistrationUnavailable,
@@ -42,6 +43,7 @@ PREFERENCE_KEYS = (
     "ps3Gradient",
     "visualizerType",
     "oscilloscopeColor",
+    "oscilloscopeOutlineColor",
     "win7Oscilloscope",
     "hideExtremeWarning"
 )
@@ -60,6 +62,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordResetRequest(BaseModel):
+    username: str
+    password: str
+
+
 class Preferences(BaseModel):
     mode: str | None = None
     basicTheme: str | None = None
@@ -67,6 +74,7 @@ class Preferences(BaseModel):
     ps3Gradient: str | None = None
     visualizerType: str | None = None
     oscilloscopeColor: str | None = None
+    oscilloscopeOutlineColor: str | None = None
     win7Oscilloscope: str | None = None
     hideExtremeWarning: bool | None = None
 
@@ -389,6 +397,41 @@ def register(body: LoginRequest, request: Request, response: Response):
     return {
         "logged_in": True,
         "username": identity["username"]
+    }
+
+
+@app.post("/api/password-reset")
+def reset_password(body: PasswordResetRequest):
+    username = body.username.strip()
+    password = body.password
+
+    if not username:
+        raise HTTPException(status_code=400, detail="A username is required.")
+
+    if not password:
+        raise HTTPException(status_code=400, detail="A new password is required.")
+
+    try:
+        jellyfin.reset_password(username, password)
+    except PasswordResetUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset is not available right now."
+        )
+    except RegistrationUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset is not available right now."
+        )
+    except (
+        ServerUnreachable,
+        JellyfinError,
+        requests.exceptions.RequestException
+    ) as error:
+        raise unreachable(error)
+
+    return {
+        "message": "If that account exists, its password has been reset."
     }
 
 

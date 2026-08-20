@@ -116,7 +116,7 @@
                         Download
                     </button>
                     <button id="export-playlist" class="quiet-button hidden">
-                        Download playlist file
+                        Save metadata
                     </button>
                 </div>
             </div>
@@ -229,9 +229,62 @@
             </form>
 
             <p class="auth-switch">
+                <button type="button" id="open-forgot-password">Forgot password?</button>
+            </p>
+
+            <p class="auth-switch">
                 New here?
                 <button type="button" id="open-create-account">Create an account</button>
             </p>
+
+        </section>
+
+        <section id="forgot-password-page" class="page hidden">
+
+            <button class="back-button">← Back</button>
+
+            <p class="page-kind">Account</p>
+            <h1 class="page-title">Reset password</h1>
+
+            <form id="forgot-password-form" class="auth-form" autocomplete="on">
+                <label>
+                    Username
+                    <input
+                        id="reset-username"
+                        name="username"
+                        type="text"
+                        autocomplete="username"
+                        spellcheck="false"
+                        required
+                    >
+                </label>
+
+                <label>
+                    New password
+                    <input
+                        id="reset-password"
+                        name="password"
+                        type="password"
+                        autocomplete="new-password"
+                        required
+                    >
+                </label>
+
+                <label>
+                    Confirm password
+                    <input
+                        id="reset-password-confirm"
+                        name="password-confirm"
+                        type="password"
+                        autocomplete="new-password"
+                        required
+                    >
+                </label>
+
+                <p id="forgot-password-message" class="error hidden"></p>
+
+                <button id="forgot-password-submit" type="submit">Reset password</button>
+            </form>
 
         </section>
 
@@ -454,6 +507,14 @@
                 <label for="oscilloscope-color-input" class="settings-hint">
                     Wave color
                 </label>
+            </div>
+
+            <div id="oscilloscope-outline-picker">
+                <label class="dialog-check">
+                    <input id="oscilloscope-outline-enabled" type="checkbox">
+                    Wave outline
+                </label>
+                <input id="oscilloscope-outline-color-input" type="color" value="#ffffff">
             </div>
 
             <div id="win7-oscilloscope-options" class="hidden">
