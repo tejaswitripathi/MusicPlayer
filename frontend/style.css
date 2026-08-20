@@ -1387,7 +1387,8 @@ body.queue-open #top-bar {
     background-color: var(--surface-raised);
 }
 
-#change-cover {
+#change-cover,
+#edit-playlist {
     margin-top: 14px;
 }
 
@@ -2203,6 +2204,27 @@ body.queue-open #top-bar {
     height: 16px;
 
     accent-color: var(--accent);
+}
+
+.dialog-input {
+    width: 100%;
+
+    padding: 10px 12px;
+
+    background-color: var(--surface-raised);
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+
+    color: var(--text);
+    font-family: inherit;
+    font-size: 15px;
+
+    outline: none;
+}
+
+.dialog-input:focus {
+    border-color: #666;
 }
 
 #dialog-actions {

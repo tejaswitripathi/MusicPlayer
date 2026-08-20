@@ -658,6 +658,25 @@ class AppClient:
             }
         )
 
+    def rename_playlist(self, playlist_id: str, name: str):
+        self._own_playlist(playlist_id)
+
+        self._send(
+            "POST",
+            f"Playlists/{playlist_id}",
+            body={"Name": name}
+        )
+
+        return {"id": playlist_id, "name": name}
+
+    def delete_playlist(self, playlist_id: str):
+        self._own_playlist(playlist_id)
+
+        self._send("DELETE", f"Items/{playlist_id}")
+        self._forget_playlist(playlist_id)
+
+        return {"deleted": playlist_id}
+
     def create_playlist(self, name: str):
         response = self._send(
             "POST",
@@ -744,6 +763,13 @@ class AppClient:
         PLAYLIST_OWNERS_DIR.mkdir(parents=True, exist_ok=True)
         self._owner_file().write_text(json.dumps(sorted(known), indent=2))
 
+    def _forget_playlist(self, playlist_id):
+        known = self._known_playlists()
+        known.discard(str(playlist_id))
+
+        PLAYLIST_OWNERS_DIR.mkdir(parents=True, exist_ok=True)
+        self._owner_file().write_text(json.dumps(sorted(known), indent=2))
+
     def reset_password(self, username, new_password):
         admin = self._admin_identity()
         users = self._list_users()
@@ -763,11 +789,12 @@ class AppClient:
 
         def send():
             return requests.post(
-                f"{self.server_url}/Users/{user_id}/Password",
+                f"{self.server_url}/Users/Password",
+                params={"userId": user_id},
                 json={
                     "CurrentPw": "",
                     "NewPw": new_password,
-                    "ResetPassword": True
+                    "ResetPassword": False
                 },
                 headers=self._admin_headers(admin["access_token"]),
                 timeout=JELLYFIN_TIMEOUT

@@ -24,6 +24,7 @@ const detailTracksElement = document.getElementById("detail-tracks");
 const detailAlbumsElement = document.getElementById("detail-albums");
 const playlistActions = document.getElementById("playlist-actions");
 const changeCoverButton = document.getElementById("change-cover");
+const editPlaylistButton = document.getElementById("edit-playlist");
 const downloadCollectionButton = document.getElementById("download-collection");
 const exportPlaylistButton = document.getElementById("export-playlist");
 const coverFileInput = document.getElementById("cover-file");
@@ -924,6 +925,7 @@ function showAlbum(album) {
 
     playlistActions.classList.add("hidden");
     changeCoverButton.classList.add("hidden");
+    editPlaylistButton.classList.add("hidden");
     exportPlaylistButton.classList.add("hidden");
 
     const subtitle = [album.artist, album.year]
@@ -954,7 +956,8 @@ function showPlaylist(playlist) {
     currentDetailCollection = { kind: "playlists", item: playlist };
 
     playlistActions.classList.remove("hidden");
-    changeCoverButton.classList.remove("hidden");
+    changeCoverButton.classList.add("hidden");
+    editPlaylistButton.classList.remove("hidden");
     exportPlaylistButton.classList.remove("hidden");
 
     setDetailHeader("Playlist", playlist.name, "", playlist.cover_url, false);
@@ -999,6 +1002,7 @@ function showArtist(artist) {
 
     playlistActions.classList.add("hidden");
     changeCoverButton.classList.add("hidden");
+    editPlaylistButton.classList.add("hidden");
     downloadCollectionButton.classList.add("hidden");
     exportPlaylistButton.classList.add("hidden");
 
@@ -1928,12 +1932,159 @@ function versioned(url) {
     return `${url}?v=${coverVersion}`;
 }
 
-changeCoverButton.addEventListener("click", () => {
+function startPlaylistCoverChange() {
     // Cleared so choosing the same file twice still counts as a change.
     coverFileInput.value = "";
 
     coverFileInput.click();
-});
+}
+
+function showEditPlaylistDialog() {
+    if (!openPlaylist) {
+        return;
+    }
+
+    openDialog({
+        title: "Edit playlist",
+        message: openPlaylist.name || "Playlist",
+        actions: [
+            {
+                label: "Change cover",
+                onClick: () => {
+                    closeDialog();
+                    startPlaylistCoverChange();
+                }
+            },
+            {
+                label: "Rename playlist",
+                onClick: () => {
+                    closeDialog();
+                    showRenamePlaylistDialog();
+                }
+            },
+            {
+                label: "Delete playlist",
+                onClick: () => {
+                    closeDialog();
+                    showDeletePlaylistDialog();
+                }
+            },
+            {
+                label: "Cancel",
+                onClick: closeDialog
+            }
+        ]
+    });
+}
+
+function showRenamePlaylistDialog() {
+    if (!openPlaylist) {
+        return;
+    }
+
+    const input = element("input", "dialog-input");
+
+    input.type = "text";
+    input.value = openPlaylist.name || "";
+    input.placeholder = "Playlist name";
+
+    openDialog({
+        title: "Rename playlist",
+        message: "",
+        extra: input,
+        actions: [
+            {
+                label: "Cancel",
+                onClick: closeDialog
+            },
+            {
+                label: "Rename",
+                primary: true,
+                onClick: () => renameOpenPlaylist(input.value)
+            }
+        ]
+    });
+
+    input.focus();
+    input.select();
+}
+
+function renameOpenPlaylist(name) {
+    const playlist = openPlaylist;
+    const nextName = name.trim();
+
+    if (!playlist || !nextName) {
+        return;
+    }
+
+    fetch(`/api/playlists/${playlist.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+    })
+        .then(readJson)
+        .then(updated => {
+            closeDialog();
+
+            openPlaylist = { ...playlist, ...updated, name: nextName };
+            currentDetailCollection = { kind: "playlists", item: openPlaylist };
+            libraryLoadedAt = 0;
+            loadLibrary();
+            openTab(() => showPlaylist(openPlaylist));
+        })
+        .catch(error => {
+            document.getElementById("dialog-message").textContent =
+                `Could not rename the playlist. ${error.message}`;
+        });
+}
+
+function showDeletePlaylistDialog() {
+    if (!openPlaylist) {
+        return;
+    }
+
+    openDialog({
+        title: "Delete playlist",
+        message: `Delete "${displayText(openPlaylist.name || "this playlist")}"? This cannot be undone.`,
+        actions: [
+            {
+                label: "Cancel",
+                onClick: closeDialog
+            },
+            {
+                label: "Delete",
+                primary: true,
+                onClick: deleteOpenPlaylist
+            }
+        ]
+    });
+}
+
+function deleteOpenPlaylist() {
+    const playlist = openPlaylist;
+
+    if (!playlist) {
+        return;
+    }
+
+    fetch(`/api/playlists/${playlist.id}`, { method: "DELETE" })
+        .then(readJson)
+        .then(() => {
+            closeDialog();
+
+            openPlaylist = null;
+            currentDetailCollection = null;
+            libraryLoadedAt = 0;
+            openTab(showLibrary);
+        })
+        .catch(error => {
+            document.getElementById("dialog-message").textContent =
+                `Could not delete the playlist. ${error.message}`;
+        });
+}
+
+changeCoverButton.addEventListener("click", startPlaylistCoverChange);
+editPlaylistButton.addEventListener("click", showEditPlaylistDialog);
 
 coverFileInput.addEventListener("change", () => {
     const file = coverFileInput.files[0];
@@ -2839,29 +2990,29 @@ function startOscilloscope() {
         // RMS sits well below 1 for real music; scale so typical loud
         // passages fill the range. Peak catches the sharpest transients.
         const rms = Math.sqrt(sumSquares / bufferLength);
-        const energy = Math.min(1, rms * 2.6 + peak * 0.22);
+        const energy = Math.min(1, rms * 2.2 + peak * 0.18);
 
         oscilloscopeEnergyFast += (energy - oscilloscopeEnergyFast) * 0.42;
         oscilloscopeEnergySlow += (energy - oscilloscopeEnergySlow) * 0.055;
 
         // A spike/drop is a sudden lift of the fast envelope above the
         // slower ambient level — quiet into loud, or a hard transient.
-        const onset = Math.max(0, oscilloscopeEnergyFast - oscilloscopeEnergySlow - 0.035);
+        const onset = Math.max(0, oscilloscopeEnergyFast - oscilloscopeEnergySlow - 0.045);
 
-        if (onset > 0.07) {
-            oscilloscopePulse = Math.min(1, oscilloscopePulse + onset * 2.6);
+        if (onset > 0.08) {
+            oscilloscopePulse = Math.min(1, oscilloscopePulse + onset * 2.0);
 
-            if (onset > 0.11 && oscilloscopeShockwaves.length < maxShockwaves) {
+            if (onset > 0.13 && oscilloscopeShockwaves.length < maxShockwaves) {
                 oscilloscopeShockwaves.push({
                     radius: 18,
-                    alpha: 0.13 + onset * 0.33,
-                    width: 1 + onset * 1.4
+                    alpha: 0.1 + onset * 0.25,
+                    width: 0.85 + onset * 1.1
                 });
             }
         }
 
-        oscilloscopePulse *= 0.9;
-        oscilloscopePulse = Math.max(oscilloscopePulse, energy * 0.38);
+        oscilloscopePulse *= 0.88;
+        oscilloscopePulse = Math.max(oscilloscopePulse, energy * 0.3);
 
         const pulse = oscilloscopePulse;
         const centerX = width / 2;

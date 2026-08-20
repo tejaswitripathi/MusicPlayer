@@ -53,6 +53,10 @@ class NewPlaylist(BaseModel):
     name: str
 
 
+class RenamePlaylist(BaseModel):
+    name: str
+
+
 class PlaylistItems(BaseModel):
     track_ids: list[str]
 
@@ -539,6 +543,36 @@ def create_playlist(body: NewPlaylist, client: AppClient = Depends(require_clien
     library.invalidate(client.user_id)
 
     return created
+
+
+@app.patch("/api/playlists/{playlist_id}")
+def rename_playlist(
+    playlist_id: str,
+    body: RenamePlaylist,
+    client: AppClient = Depends(require_client)
+):
+    name = body.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="A playlist needs a name."
+        )
+
+    updated = jellyfin_call(lambda: client.rename_playlist(playlist_id, name), client)
+
+    library.invalidate(client.user_id)
+
+    return updated
+
+
+@app.delete("/api/playlists/{playlist_id}")
+def delete_playlist(playlist_id: str, client: AppClient = Depends(require_client)):
+    deleted = jellyfin_call(lambda: client.delete_playlist(playlist_id), client)
+
+    library.invalidate(client.user_id)
+
+    return deleted
 
 
 @app.get("/api/playlists/{playlist_id}/tracks")
