@@ -19,7 +19,7 @@ JELLYFIN_TIMEOUT = (3, 15)
 PROBE_TIMEOUT = (2, 4)
 
 APP_NAME = "MusicPlayer"
-APP_VERSION = "0.0.1"
+APP_VERSION = "1.0.0"
 DEVICE_NAME = "MusicPlayer"
 PLAYLIST_OWNERS_DIR = Path(__file__).resolve().parent / "data" / "playlist_owners"
 

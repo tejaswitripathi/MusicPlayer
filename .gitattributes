@@ -1,3 +1,6 @@
 dist/musicplayer-0.1.0-arm64.tar.xz filter=lfs diff=lfs merge=lfs -text
 dist/MusicPlayer-0.1.0-arm64.dmg filter=lfs diff=lfs merge=lfs -text
 dist/MusicPlayer[[:space:]]Setup[[:space:]]0.1.0.exe filter=lfs diff=lfs merge=lfs -text
+dist/musicplayer-1.0.0-arm64.tar.xz filter=lfs diff=lfs merge=lfs -text
+dist/MusicPlayer[[:space:]]Setup[[:space:]]1.0.0.exe filter=lfs diff=lfs merge=lfs -text
+dist/MusicPlayer-1.0.0-arm64.dmg filter=lfs diff=lfs merge=lfs -text
