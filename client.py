@@ -733,7 +733,9 @@ def owned_by(item, user_id):
     playlists from other accounts still appear in Users/Items, so ownership
     is what keeps each person's list private.
     """
-    return same_id(item.get("OwnerUserId"), user_id)
+    owner = item.get("OwnerUserId")
+
+    return not owner or same_id(owner, user_id)
 
 
 TRACK_FIELDS = "ParentIndexNumber,RunTimeTicks,Path"

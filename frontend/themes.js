@@ -132,6 +132,13 @@ const PS3_GRADIENTS = [
         start: [115, 68, 20],
         end: [154, 118, 47],
         angle: 90
+    },
+    {
+        id: "01_night",
+        label: "Dark gray → black",
+        start: [181, 181, 181],
+        end: [0, 0, 0],
+        angle: 89.75
     }
 ];
 
@@ -155,7 +162,14 @@ const WIN7_OSCOPE = {
     sky: { r: 70, g: 180, b: 255 }
 };
 
-const VISUALIZER_TYPES = new Set(["oscilloscope", "dotted-oscilloscope", "fft-bars", "fft-dots"]);
+const VISUALIZER_TYPES = new Set([
+    "oscilloscope",
+    "dotted-oscilloscope",
+    "fft-bars",
+    "fft-dots",
+    "fft-bars-mirror",
+    "fft-dots-mirror"
+]);
 
 const defaultSettings = () => ({
     mode: "basic",
@@ -757,10 +771,15 @@ function openPs3GradientDialog() {
 }
 
 function setOscilloscopeColor(hex) {
+    if (settings.mode === "extreme" && settings.extremeTheme === "windows7") {
+        return;
+    }
+
     settings.oscilloscopeColor = hex;
 
-    // Leaving an extreme theme via the color wheel always lands on default dark.
-    if (settings.mode === "extreme") {
+    // Windows 7 owns its oscilloscope palette; non-PS3 extreme themes fall
+    // back to a basic theme when the general color wheel is used.
+    if (settings.mode === "extreme" && settings.extremeTheme !== "ps3") {
         settings.mode = "basic";
         settings.basicTheme = "default-dark";
         settings.extremeTheme = null;
@@ -868,6 +887,7 @@ function renderThemePickers() {
 
 function renderOscilloscopeColorPage() {
     const input = document.getElementById("oscilloscope-color-input");
+    const picker = document.getElementById("oscilloscope-color-picker");
     const win7Options = document.getElementById("win7-oscilloscope-options");
     const win7Toggle = document.getElementById("win7-oscope-toggle");
     const onWin7 =
@@ -875,6 +895,10 @@ function renderOscilloscopeColorPage() {
 
     if (input) {
         input.value = settings.oscilloscopeColor || "#ffffff";
+    }
+
+    if (picker) {
+        picker.classList.toggle("hidden", onWin7);
     }
 
     if (win7Options) {

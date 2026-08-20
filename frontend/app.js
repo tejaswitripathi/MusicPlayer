@@ -12,6 +12,7 @@ const currentTimeElement = document.getElementById("current-time");
 const durationElement = document.getElementById("duration");
 const visualizerToggle = document.getElementById("visualizer-toggle");
 
+const refreshButton = document.getElementById("refresh-button");
 const libraryTab = document.getElementById("library-tab");
 const searchTab = document.getElementById("search-tab");
 const searchInput = document.getElementById("search-input");
@@ -23,13 +24,20 @@ const detailTracksElement = document.getElementById("detail-tracks");
 const detailAlbumsElement = document.getElementById("detail-albums");
 const playlistActions = document.getElementById("playlist-actions");
 const changeCoverButton = document.getElementById("change-cover");
+const downloadCollectionButton = document.getElementById("download-collection");
+const exportPlaylistButton = document.getElementById("export-playlist");
 const coverFileInput = document.getElementById("cover-file");
+const playlistFileInput = document.getElementById("playlist-file");
 const queueListElement = document.getElementById("queue-list");
 const discFilters = document.getElementById("disc-filters");
 const menuOverlay = document.getElementById("menu-overlay");
 const menuElement = document.getElementById("menu");
 
 let playlists = [];
+let offlineCollections = {
+    albums: new Set(),
+    playlists: new Set()
+};
 
 // Queue entries wrap a track because the same song can sit in the queue more
 // than once; an id per entry is what tells those copies apart.
@@ -41,6 +49,7 @@ let currentTrack = null;
 
 // The playlist whose page is open, so its own tracks can offer to leave it.
 let openPlaylist = null;
+let currentDetailCollection = null;
 
 // The track list on show, split into discs, and which of them is selected.
 let listOptions = {};
@@ -86,10 +95,14 @@ function element(tag, className, text) {
     }
 
     if (text !== undefined && text !== null) {
-        node.textContent = text;
+        node.textContent = displayText(text);
     }
 
     return node;
+}
+
+function displayText(text) {
+    return String(text).replace(/([\p{L}\p{N}])\s*(['’])\s*([\p{L}\p{N}])/gu, "$1$2$3");
 }
 
 function artwork(url, className) {
@@ -128,6 +141,10 @@ function tile(coverUrl, title, subtitle, artClassName) {
     }
 
     return node;
+}
+
+function markDownloadedTile(node, kind, id) {
+    node.classList.toggle("downloaded", isDownloaded(kind, id));
 }
 
 function resultRow(coverUrl, title, subtitle, artClassName) {
@@ -391,6 +408,10 @@ document.addEventListener("click", event => {
 
 /* Tabs */
 
+refreshButton.addEventListener("click", () => {
+    window.location.reload();
+});
+
 function setActiveTab(tab) {
     libraryTab.classList.toggle("active", tab === libraryTab);
     searchTab.classList.toggle("active", tab === searchTab);
@@ -435,9 +456,32 @@ function loadLibrary() {
 
     libraryLoadedAt = Date.now();
 
-    loadPlaylists();
-    loadAlbums();
-    loadArtists();
+    loadOfflineIndex().finally(() => {
+        loadPlaylists();
+        loadAlbums();
+        loadArtists();
+    });
+}
+
+function loadOfflineIndex() {
+    return fetch("/local/offline")
+        .then(readJson)
+        .then(index => {
+            offlineCollections = {
+                albums: new Set(index.albums || []),
+                playlists: new Set(index.playlists || [])
+            };
+        })
+        .catch(() => {
+            offlineCollections = {
+                albums: new Set(),
+                playlists: new Set()
+            };
+        });
+}
+
+function isDownloaded(kind, id) {
+    return Boolean(id && offlineCollections[kind]?.has(id));
 }
 
 // Music added to the Jellyfin folder while the window sat in the background
@@ -466,10 +510,12 @@ function loadPlaylists() {
 }
 
 function renderPlaylists() {
-    const tiles = [newPlaylistTile()];
+    const tiles = [newPlaylistTile(), openPlaylistFileTile()];
 
     playlists.forEach(playlist => {
         const node = tile(playlist.cover_url, playlist.name);
+
+        markDownloadedTile(node, "playlists", playlist.id);
 
         node.addEventListener("click", () => {
             openView(() => showPlaylist(playlist));
@@ -492,6 +538,19 @@ function newPlaylistTile() {
         if (!node.querySelector("input")) {
             startNewPlaylist(node);
         }
+    });
+
+    return node;
+}
+
+function openPlaylistFileTile() {
+    const node = tile(null, "Open file");
+
+    node.classList.add("open-playlist-file");
+
+    node.addEventListener("click", () => {
+        playlistFileInput.value = "";
+        playlistFileInput.click();
     });
 
     return node;
@@ -551,12 +610,7 @@ function startNewPlaylist(node) {
 }
 
 function createPlaylist(name) {
-    fetch("/api/playlists", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name })
-    })
-        .then(readJson)
+    createPlaylistRequest(name)
         .then(loadPlaylists)
         .catch(error => {
             renderPlaylists();
@@ -571,6 +625,14 @@ function createPlaylist(name) {
         });
 }
 
+function createPlaylistRequest(name) {
+    return fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name })
+    }).then(readJson);
+}
+
 function loadAlbums() {
     fetch("/api/albums")
         .then(readJson)
@@ -583,6 +645,8 @@ function loadAlbums() {
                         album.title,
                         album.artist
                     );
+
+                    markDownloadedTile(node, "albums", album.id);
 
                     node.addEventListener("click", () => {
                         openView(() => showAlbum(album));
@@ -684,8 +748,8 @@ document
 
 function setDetailHeader(kind, title, subtitle, coverUrl, round) {
     document.getElementById("detail-kind").textContent = kind;
-    document.getElementById("detail-title").textContent = title || "Unknown";
-    document.getElementById("detail-subtitle").textContent = subtitle || "";
+    document.getElementById("detail-title").textContent = displayText(title || "Unknown");
+    document.getElementById("detail-subtitle").textContent = displayText(subtitle || "");
 
     const art = document.getElementById("detail-art");
     const cover = document.getElementById("detail-cover");
@@ -699,6 +763,23 @@ function setDetailHeader(kind, title, subtitle, coverUrl, round) {
     } else {
         cover.classList.add("missing");
         cover.removeAttribute("src");
+    }
+}
+
+function updateDetailActions() {
+    const collection = currentDetailCollection;
+    const isCollection = Boolean(collection);
+    const downloaded = collection && isDownloaded(collection.kind, collection.item.id);
+
+    downloadCollectionButton.classList.toggle("hidden", !isCollection);
+    exportPlaylistButton.classList.toggle(
+        "hidden",
+        !collection || collection.kind !== "playlists"
+    );
+
+    if (isCollection) {
+        downloadCollectionButton.textContent = downloaded ? "Downloaded" : "Download";
+        downloadCollectionButton.disabled = Boolean(downloaded);
     }
 }
 
@@ -716,6 +797,10 @@ function showTrackListPage(url, options) {
     fetch(url)
         .then(readJson)
         .then(tracks => {
+            if (options.offline) {
+                tracks = tracks.map(track => ({ ...track, offline: true }));
+            }
+
             if (!tracks.length) {
                 message(detailTracksElement, "empty", "Nothing here yet.");
 
@@ -835,36 +920,58 @@ function showAlbum(album) {
     showPage("detail-page");
 
     openPlaylist = null;
+    currentDetailCollection = { kind: "albums", item: album };
 
     playlistActions.classList.add("hidden");
     changeCoverButton.classList.add("hidden");
+    exportPlaylistButton.classList.add("hidden");
 
     const subtitle = [album.artist, album.year]
         .filter(Boolean)
         .join(" • ");
 
     setDetailHeader("Album", album.title, subtitle, album.cover_url, false);
+    updateDetailActions();
 
-    showTrackListPage(`/api/albums/${album.id}/tracks`, {
-        showArtist: false,
-        splitDiscs: true
-    });
+    const offline = isDownloaded("albums", album.id);
+
+    showTrackListPage(
+        offline
+            ? `/local/offline/albums/${encodeURIComponent(album.id)}/tracks`
+            : `/api/albums/${album.id}/tracks`,
+        {
+            showArtist: false,
+            splitDiscs: true,
+            offline
+        }
+    );
 }
 
 function showPlaylist(playlist) {
     showPage("detail-page");
 
     openPlaylist = playlist;
+    currentDetailCollection = { kind: "playlists", item: playlist };
 
     playlistActions.classList.remove("hidden");
     changeCoverButton.classList.remove("hidden");
+    exportPlaylistButton.classList.remove("hidden");
 
     setDetailHeader("Playlist", playlist.name, "", playlist.cover_url, false);
+    updateDetailActions();
 
-    showTrackListPage(`/api/playlists/${playlist.id}/tracks`, {
-        showArtist: true,
-        playlistId: playlist.id
-    });
+    const offline = isDownloaded("playlists", playlist.id);
+
+    showTrackListPage(
+        offline
+            ? `/local/offline/playlists/${encodeURIComponent(playlist.id)}/tracks`
+            : `/api/playlists/${playlist.id}/tracks`,
+        {
+            showArtist: true,
+            playlistId: playlist.id,
+            offline
+        }
+    );
 }
 
 function removeFromPlaylist(context) {
@@ -888,9 +995,12 @@ function showArtist(artist) {
     showPage("detail-page");
 
     openPlaylist = null;
+    currentDetailCollection = null;
 
     playlistActions.classList.add("hidden");
     changeCoverButton.classList.add("hidden");
+    downloadCollectionButton.classList.add("hidden");
+    exportPlaylistButton.classList.add("hidden");
 
     setDetailHeader("Artist", artist.name, "", artist.cover_url, true);
 
@@ -1242,7 +1352,7 @@ function renderQueue() {
 function showAddToPlaylist(track) {
     showPage("add-to-playlist-page");
 
-    document.getElementById("add-to-playlist-title").textContent = track.title;
+    document.getElementById("add-to-playlist-title").textContent = displayText(track.title);
 
     const container = document.getElementById("playlist-choices");
 
@@ -1440,7 +1550,7 @@ function showAddSongs(playlist) {
 
     addSongsPlaylist = playlist;
 
-    document.getElementById("add-songs-title").textContent = playlist.name;
+    document.getElementById("add-songs-title").textContent = displayText(playlist.name);
 
     message(addSongsResults, "empty", "Search for songs to add.");
 
@@ -1449,7 +1559,11 @@ function showAddSongs(playlist) {
 
     // Songs already in the playlist come back marked, so nothing gets added
     // to it twice by accident.
-    fetch(`/api/playlists/${playlist.id}/tracks`)
+    const tracksUrl = isDownloaded("playlists", playlist.id)
+        ? `/local/offline/playlists/${encodeURIComponent(playlist.id)}/tracks`
+        : `/api/playlists/${playlist.id}/tracks`;
+
+    fetch(tracksUrl)
         .then(readJson)
         .then(tracks => {
             addSongsHeld = new Set(tracks.map(track => track.id));
@@ -1573,6 +1687,192 @@ document.getElementById("add-songs-button").addEventListener("click", () => {
         const playlist = openPlaylist;
 
         openView(() => showAddSongs(playlist));
+    }
+});
+
+
+/* Offline collections and playlist files */
+
+function downloadCurrentCollection() {
+    const collection = currentDetailCollection;
+
+    if (!collection || isDownloaded(collection.kind, collection.item.id)) {
+        return;
+    }
+
+    downloadCollectionButton.disabled = true;
+    downloadCollectionButton.textContent = "Downloading…";
+
+    fetch("/local/offline/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collection)
+    })
+        .then(readJson)
+        .then(() => loadOfflineIndex())
+        .then(() => {
+            if (currentView) {
+                currentView();
+            } else {
+                updateDetailActions();
+            }
+
+            libraryLoadedAt = 0;
+            loadLibrary();
+        })
+        .catch(error => {
+            downloadCollectionButton.disabled = false;
+            downloadCollectionButton.textContent = "Download";
+
+            openDialog({
+                title: "Download failed",
+                message: error.message,
+                actions: [
+                    {
+                        label: "OK",
+                        primary: true,
+                        onClick: closeDialog
+                    }
+                ]
+            });
+        });
+}
+
+function playlistFileName(name) {
+    return `${displayText(name || "playlist")
+        .replace(/[^a-z0-9._-]+/ig, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLowerCase() || "playlist"}.musicplayer-playlist.json`;
+}
+
+function exportCurrentPlaylist() {
+    const playlist = openPlaylist;
+
+    if (!playlist) {
+        return;
+    }
+
+    const tracksUrl = isDownloaded("playlists", playlist.id)
+        ? `/local/offline/playlists/${encodeURIComponent(playlist.id)}/tracks`
+        : `/api/playlists/${playlist.id}/tracks`;
+
+    fetch(tracksUrl)
+        .then(readJson)
+        .then(tracks => {
+            const file = {
+                type: "musicplayer-playlist",
+                version: 1,
+                playlist: {
+                    name: playlist.name,
+                    id: playlist.id,
+                    cover_url: playlist.cover_url || null
+                },
+                tracks
+            };
+            const blob = new Blob([JSON.stringify(file, null, 2)], {
+                type: "application/json"
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = playlistFileName(playlist.name);
+            link.click();
+            URL.revokeObjectURL(url);
+        })
+        .catch(error => {
+            openDialog({
+                title: "Export failed",
+                message: error.message,
+                actions: [
+                    {
+                        label: "OK",
+                        primary: true,
+                        onClick: closeDialog
+                    }
+                ]
+            });
+        });
+}
+
+function importPlaylistFile(file) {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+        let parsed;
+
+        try {
+            parsed = JSON.parse(reader.result);
+        } catch (error) {
+            openDialog({
+                title: "Could not open playlist",
+                message: "That file is not valid playlist metadata.",
+                actions: [
+                    {
+                        label: "OK",
+                        primary: true,
+                        onClick: closeDialog
+                    }
+                ]
+            });
+            return;
+        }
+
+        const name = parsed.playlist?.name || parsed.name || file.name.replace(/\.[^.]+$/, "");
+        const tracks = Array.isArray(parsed.tracks) ? parsed.tracks : [];
+        const trackIds = tracks.map(track => track.id).filter(Boolean);
+
+        if (!trackIds.length) {
+            openDialog({
+                title: "Could not open playlist",
+                message: "The playlist file did not contain any track ids.",
+                actions: [
+                    {
+                        label: "OK",
+                        primary: true,
+                        onClick: closeDialog
+                    }
+                ]
+            });
+            return;
+        }
+
+        message(playlistsRow, "empty", "Creating playlist…");
+
+        createPlaylistRequest(name)
+            .then(playlist => fetch(`/api/playlists/${playlist.id}/items`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ track_ids: trackIds })
+            }).then(readJson).then(() => playlist))
+            .then(playlist => {
+                libraryLoadedAt = 0;
+                loadPlaylists();
+                openView(() => showPlaylist(playlist));
+            })
+            .catch(error => {
+                renderPlaylists();
+                playlistsRow.appendChild(
+                    element(
+                        "p",
+                        "error",
+                        `Could not import the playlist. ${error.message}`
+                    )
+                );
+            });
+    };
+
+    reader.readAsText(file);
+}
+
+downloadCollectionButton.addEventListener("click", downloadCurrentCollection);
+exportPlaylistButton.addEventListener("click", exportCurrentPlaylist);
+
+playlistFileInput.addEventListener("change", () => {
+    const file = playlistFileInput.files[0];
+
+    if (file) {
+        importPlaylistFile(file);
     }
 });
 
@@ -1915,13 +2215,15 @@ function playTrack(track) {
 
     currentTrack = track;
 
-    player.src = `/api/tracks/${track.id}/stream`;
+    player.src = track.offline
+        ? `/local/offline/tracks/${encodeURIComponent(track.id)}/stream`
+        : `/api/tracks/${track.id}/stream`;
 
     document.getElementById("now-playing-title").textContent =
-        track.title || "";
+        displayText(track.title || "");
 
     document.getElementById("now-playing-subtitle").textContent =
-        [track.artist, track.album].filter(Boolean).join(" • ");
+        displayText([track.artist, track.album].filter(Boolean).join(" • "));
 
     const cover = document.getElementById("now-playing-cover");
 
@@ -2283,14 +2585,15 @@ function fftRiseSmoothing(lowPower) {
 
 function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
     const lowPower = window.GraphicsProfile?.current?.lowPower === true;
-    const dots = kind === "fft-dots";
+    const dots = kind === "fft-dots" || kind === "fft-dots-mirror";
+    const mirrored = kind === "fft-bars-mirror" || kind === "fft-dots-mirror";
     const binCount = dots
         ? (lowPower ? 72 : 128)
         : (lowPower ? 18 : 32);
     const riseSmoothing = fftRiseSmoothing(lowPower);
     const fallSmoothing = fftFallSmoothing(lowPower);
-    const bottom = height * 0.76;
-    const maxBarHeight = height * 0.62;
+    const bottom = mirrored ? height * 0.5 : height * 0.76;
+    const maxBarHeight = mirrored ? height * 0.38 : height * 0.62;
     const frequencyCeiling = 0.88;
 
     if (!visualizerSmoothedBins || visualizerSmoothedBins.length !== binCount) {
@@ -2347,11 +2650,18 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
             const centerX = x + barWidth * 0.5;
 
             for (let dot = 0; dot < dotCount; dot++) {
-                const y = bottom - dot * dotGap;
+                const offset = dot * dotGap;
+                const y = bottom - offset;
 
                 ctx.beginPath();
                 ctx.arc(centerX, y, radius, 0, Math.PI * 2);
                 ctx.fill();
+
+                if (mirrored && offset > 0) {
+                    ctx.beginPath();
+                    ctx.arc(centerX, bottom + offset, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
 
             continue;
@@ -2361,6 +2671,10 @@ function drawFftHistogram(ctx, dataArray, width, height, tone, kind) {
         const centeredX = x + (step - gap - barWidth) * 0.5;
 
         ctx.fillRect(centeredX, y, barWidth, barHeight);
+
+        if (mirrored) {
+            ctx.fillRect(centeredX, bottom, barWidth, barHeight);
+        }
     }
 }
 
@@ -2463,7 +2777,7 @@ function startOscilloscope() {
             ? currentOscilloscopeRgb()
             : { r: 255, g: 255, b: 255 };
 
-        if (visualizerType === "fft-bars" || visualizerType === "fft-dots") {
+        if (visualizerType.startsWith("fft-")) {
             analyser.getByteFrequencyData(frequencyData);
             drawFftHistogram(ctx, frequencyData, width, height, tone, visualizerType);
 
@@ -2974,6 +3288,57 @@ function wireLoginForm() {
 }
 
 
+/* App updates */
+
+let pendingReleaseAsset = null;
+
+function checkForUpdates() {
+    fetch("/local/releases/check")
+        .then(readJson)
+        .then(info => {
+            if (!info.available || !info.asset) {
+                return;
+            }
+
+            pendingReleaseAsset = info.asset;
+
+            openDialog({
+                title: "A new update is available!",
+                message: `Version ${info.latest} is ready. You are running ${info.current}.`,
+                actions: [
+                    {
+                        label: "Later",
+                        onClick: closeDialog
+                    },
+                    {
+                        label: "Download (requires restart)",
+                        primary: true,
+                        onClick: downloadPendingUpdate
+                    }
+                ]
+            });
+        })
+        .catch(() => {});
+}
+
+function downloadPendingUpdate() {
+    const asset = pendingReleaseAsset;
+
+    if (!asset) {
+        closeDialog();
+        return;
+    }
+
+    fetch("/local/releases/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset })
+    }).catch(() => {});
+
+    closeDialog();
+}
+
+
 /* Start */
 
 wirePersonalizationUi();
@@ -2981,3 +3346,4 @@ wireLoginForm();
 applyTheme();
 updateAccountMenu();
 restoreSession();
+checkForUpdates();

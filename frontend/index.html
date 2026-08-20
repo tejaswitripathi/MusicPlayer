@@ -9,6 +9,7 @@
 
     <header id="top-bar">
         <nav id="tabs">
+            <button id="refresh-button" class="icon-tab" aria-label="Refresh">↻</button>
             <button id="library-tab" class="tab active">Library</button>
             <button id="search-tab" class="tab">Search</button>
         </nav>
@@ -110,6 +111,12 @@
 
                     <button id="change-cover" class="quiet-button hidden">
                         Change cover
+                    </button>
+                    <button id="download-collection" class="quiet-button hidden">
+                        Download
+                    </button>
+                    <button id="export-playlist" class="quiet-button hidden">
+                        Download playlist file
                     </button>
                 </div>
             </div>
@@ -415,6 +422,16 @@
                     <span class="visualizer-preview preview-fft-dots" aria-hidden="true"></span>
                     <span class="settings-row-check">✓</span>
                 </button>
+                <button type="button" class="settings-row" data-visualizer-type="fft-bars-mirror">
+                    <span class="settings-row-label">Mirrored FFT histogram (bars)</span>
+                    <span class="visualizer-preview preview-fft-bars preview-mirrored" aria-hidden="true"></span>
+                    <span class="settings-row-check">✓</span>
+                </button>
+                <button type="button" class="settings-row" data-visualizer-type="fft-dots-mirror">
+                    <span class="settings-row-label">Mirrored FFT histogram (dots)</span>
+                    <span class="visualizer-preview preview-fft-dots preview-mirrored" aria-hidden="true"></span>
+                    <span class="settings-row-check">✓</span>
+                </button>
             </div>
 
         </section>
@@ -428,8 +445,8 @@
 
             <p class="settings-hint">
                 Pick a color for the waveform, glow, and particles.
-                Choosing a color while an extreme theme is active
-                returns you to Default Dark.
+                PlayStation 3 themes can use any color; Windows 7 uses
+                its fixed theme colors.
             </p>
 
             <div id="oscilloscope-color-picker">
@@ -455,6 +472,7 @@
 
     <input id="cover-file" type="file" accept="image/*" class="hidden">
     <input id="profile-file" type="file" accept="image/*" class="hidden">
+    <input id="playlist-file" type="file" accept="application/json,.json" class="hidden">
 
     <audio id="audio-player" crossorigin="anonymous"></audio>
 
