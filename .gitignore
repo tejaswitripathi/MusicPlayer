@@ -4,5 +4,9 @@ data/
 __pycache__/
 node_modules/
 .shots/
-dist/
+dist/*
+!dist/MusicPlayer Setup 0.1.0.exe
+!dist/musicplayer-0.1.0-arm64.tar.xz
+!dist/MusicPlayer-0.1.0-arm64.dmg
 data/
+notes_for_updates.txt
